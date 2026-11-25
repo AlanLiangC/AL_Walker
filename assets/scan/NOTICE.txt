@@ -1,0 +1,14 @@
+Artillery Passage, Spitalfields, London
+Capture by David Fletcher (@artfletch)
+Original: https://superspl.at/scene/f4897475
+License: Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+CityNav uses the SOG conversion published with Will Eastcott's splat-walk
+(https://github.com/willeastcott/splat-walk), cropped to the playable segment
+and thinned farther from the walking route. The application adds separate
+approximate collision geometry, an aligned local coordinate frame and
+navigation tasks.
+
+PlayCanvas Engine 2.24.3 is distributed under the MIT license in
+LICENSE-playcanvas.txt.

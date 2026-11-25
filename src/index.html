@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="在原创 3D 城市中操控机器人，验证室外导航与交通安全。">
+  <title>CityNav | 城市导航仿真</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body data-source>
+  <header class="bar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>CityNav</strong><span class="brand-divider"></span><span class="brand-description">城市导航仿真</span></div>
+    <div class="bar-actions"><button type="button" id="benchmark-library" class="button quiet">场景库</button><a id="scene-switch" class="button quiet" href="./" hidden>模拟城市</a><span id="run-state" class="state"><i></i><span>待出发</span></span><button type="button" id="configure" class="button quiet">任务配置</button><button type="button" id="run" class="button primary">开始任务</button></div>
+  </header>
+  <main>
+    <section class="heading">
+      <div>
+        <div class="eyebrow" id="domain-label">室外导航评测</div>
+        <h1>仿真工作台</h1>
+      </div>
+      <div class="heading-route">
+        <span class="task-tag" id="task-name">滨河通勤</span>
+        <span id="route-from">河湾公园西口</span><span class="path-dot" aria-hidden="true"></span><span id="route-to">社区广场</span>
+      </div>
+    </section>
+    <div class="dashboard">
+      <section class="simulation" aria-label="机器人模拟">
+        <div class="viewport" id="viewport" tabindex="-1">
+          <canvas id="scene" aria-label="实时 3D 城市场景"></canvas>
+          <div class="scene-loading" id="scene-loading" role="status">正在加载街景材质</div>
+          <div class="viewport-top">
+            <div class="maneuver" aria-live="off">
+              <span id="maneuver-icon" aria-hidden="true">↑</span><div><strong id="maneuver-title">沿路线直行</strong><small id="maneuver-distance"></small></div>
+            </div>
+            <div class="view-tabs" role="group" aria-label="场景视角">
+              <button type="button" data-view="chase" aria-pressed="true">追踪</button><button type="button" data-view="robot" aria-pressed="false">机器人</button><button type="button" data-view="overhead" aria-pressed="false">俯视</button>
+              <button type="button" id="fullscreen" aria-pressed="false">全屏</button>
+              <button type="button" id="reset-view" title="复位视角（V）">复位</button>
+            </div>
+          </div>
+          <div class="immersive-controls"><span id="immersive-stats"></span><button type="button" id="fullscreen-run">开始任务</button></div>
+          <div class="compact-signal" id="compact-signal" hidden></div>
+          <div class="notice" id="notice" hidden></div>
+          <div class="viewport-bottom">
+            <div class="robot-hud"><span class="live-dot"></span><span id="robot-name"></span></div>
+            <div class="pointer-controls" aria-label="触控驾驶">
+              <button aria-label="前进" data-key="KeyW" type="button">↑</button><button id="touch-slow" aria-pressed="false" aria-label="慢行" type="button">慢</button><div><button aria-label="左转" data-key="KeyA" type="button">←</button><button aria-label="后退" data-key="KeyS" type="button">↓</button><button aria-label="右转" data-key="KeyD" type="button">→</button><button aria-label="制动" data-key="Space" type="button">■</button></div>
+            </div>
+            <button type="button" id="open-sensors" class="sensor-toggle" aria-expanded="false" aria-controls="sensor-panel"><span aria-hidden="true">◈</span>传感器</button>
+          </div>
+        </div>
+        <div class="metrics" aria-label="任务指标">
+          <div><span>剩余时间</span><strong id="timer">02:50</strong></div>
+          <div><span>安全分</span><strong class="safe" id="score">100</strong><small> / 100</small></div>
+          <div><span>当前速度</span><strong id="speed">0.00</strong><small> m/s</small></div>
+          <div><span>剩余路线</span><strong id="remaining">0</strong><small> m</small></div>
+        </div>
+        <div class="controls">
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动 / 转向</span>
+          <span><kbd>Shift</kbd> 慢行</span><span><kbd>空格</kbd> 制动</span><span><kbd>C</kbd> 切换视角</span><span>拖动画面旋转 · 滚轮缩放</span><span><kbd>F</kbd> 全屏</span><span><kbd>Esc</kbd> 暂停</span>
+        </div>
+        <p class="scan-credit" id="scan-credit" hidden>Artillery Passage · <a href="https://superspl.at/scene/f4897475" target="_blank" rel="noreferrer">David Fletcher</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>
+        <section id="sensor-panel" class="card sensor-panel" hidden>
+          <div class="panel-head"><h2>传感器观测</h2><select id="sensor-choice" aria-label="预览传感器"></select></div>
+          <div id="sensor-content"><canvas id="sensor-image" width="256" height="144" aria-label="传感器图像"></canvas><pre id="sensor-data"></pre></div>
+        </section>
+      </section>
+      <aside class="sidebar">
+        <section class="card navigation" aria-label="路线导航">
+          <div class="panel-head"><h2>路线导航</h2><div class="map-buttons" role="group" aria-label="地图范围"><button type="button" data-map="overview" aria-pressed="true">全域</button><button type="button" data-map="follow" aria-pressed="false">跟随</button></div></div>
+          <div class="map-wrap"><canvas id="map" width="400" height="300" aria-label="北向上的城市路线地图"></canvas><span class="north" aria-hidden="true">N <b>↑</b></span><span id="map-scale" class="map-scale"></span></div>
+          <div class="route-endpoints"><div><i class="start-dot"></i><span id="map-start"></span></div><div><i class="end-dot"></i><span id="map-end"></span></div><span id="eta" class="eta"></span></div>
+          <div class="signal" id="signal"><i></i><div><strong id="signal-state"></strong><small id="signal-name"></small></div><b id="signal-count"></b></div>
+        </section>
+        <section class="card events">
+          <div class="panel-head"><h2>事件记录</h2><span id="event-count">0 条</span></div>
+          <ol id="event-list" aria-live="polite"></ol>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <dialog id="setup">
+    <form id="setup-form">
+      <div class="dialog-head"><div><div class="eyebrow">出发前</div><h2>任务配置</h2></div><button type="button" data-close="setup" class="button quiet">关闭</button></div>
+      <div class="setup-overview">
+        <div id="benchmark-picker" class="setup-domain" hidden><label for="scene-select">场景库</label><select id="scene-select"></select><p id="benchmark-count"></p></div>
+        <div class="setup-route"><label for="task-select">路线 / Episode</label><select id="task-select"></select><p id="task-detail"></p><small id="task-conditions"></small></div>
+        <div><label for="robot-select">机器人</label><select id="robot-select"></select><p id="robot-detail"></p><label for="seed">场景随机种子</label><input id="seed" type="number" min="0" max="4294967295" step="1" required></div>
+        <div class="setup-domain"><label for="domain-select">仿真环境</label><select id="domain-select"></select><p id="domain-detail"></p></div>
+      </div>
+      <p class="mount-help" id="pass-condition"></p>
+      <div class="setup-sensor-title"><h3>传感器安装</h3><button id="add-sensor" class="button quiet" type="button">添加传感器</button></div>
+      <p class="mount-help">安装位置以机身地面坐标为参考。采样率与延迟留空时使用当前环境预设。</p>
+      <div id="sensor-settings"></div>
+      <div class="dialog-actions"><span id="config-error" role="alert"></span><button type="submit" class="button primary">应用并开始</button></div>
+    </form>
+  </dialog>
+  <dialog id="result">
+    <div class="dialog-head"><div><div class="eyebrow" id="result-task"></div><h2 id="result-title"></h2></div><button type="button" data-close="result" class="button quiet">关闭</button></div>
+    <p id="result-detail"></p>
+    <div class="result-metrics" id="result-metrics"></div>
+    <div class="dialog-actions"><button type="button" id="export" class="button quiet">导出记录</button><button type="button" id="retry" class="button primary">重试任务</button></div>
+  </dialog>
+  <div id="app-error" hidden role="alert"></div>
+  <!-- CITY_TEXTURES -->
+  <!-- SCAN_SOGS -->
+  <!-- MODULE_IMPORT_MAP -->
+  <script type="importmap">{"imports":{"playcanvas":"../assets/scan/playcanvas.min.mjs"}}</script>
+  <script type="module">
+    import("./app.mjs").catch(error => {
+      console.error(error);
+      const alert = document.getElementById("app-error");
+      alert.textContent = "仿真模块加载失败。请用最新版浏览器打开项目根目录的 index.html。";
+      alert.hidden = false;
+    });
+  </script>
+  <script nomodule>
+    const alert = document.getElementById("app-error");
+    alert.textContent = "此浏览器不支持 JavaScript 模块，请用最新版浏览器打开。";
+    alert.hidden = false;
+  </script>
+</body>
+</html>
