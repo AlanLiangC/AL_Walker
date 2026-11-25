@@ -27,6 +27,10 @@
       <section class="simulation" aria-label="机器人模拟">
         <div class="viewport" id="viewport" tabindex="-1">
           <canvas id="scene" aria-label="实时 3D 城市场景"></canvas>
+          <div id="eden-output" hidden aria-hidden="true">
+            <div class="eden-draft"><canvas id="eden-draft"></canvas><span>源帧</span></div>
+            <div class="eden-main"><canvas id="eden-main"></canvas><span>增强</span></div>
+          </div>
           <div class="scene-loading" id="scene-loading" role="status">正在加载街景材质</div>
           <div class="viewport-top">
             <div class="maneuver" aria-live="off">
@@ -48,6 +52,16 @@
             </div>
             <button type="button" id="open-sensors" class="sensor-toggle" aria-expanded="false" aria-controls="sensor-panel"><span aria-hidden="true">◈</span>传感器</button>
           </div>
+        </div>
+        <div id="eden-controls" hidden>
+          <div class="view-tabs" role="group" aria-label="画面渲染">
+            <button type="button" data-eden="original" aria-pressed="true">原画</button>
+            <button type="button" data-eden="enhanced" aria-pressed="false" hidden>增强</button>
+            <button type="button" data-eden="compare" aria-pressed="false" hidden>对照</button>
+            <button type="button" data-eden="parallel" aria-pressed="false" hidden>实时并排</button>
+            <button type="button" data-eden="photo" aria-pressed="false" hidden>写实闭环</button>
+          </div>
+          <output id="eden-status" aria-live="off">原画</output>
         </div>
         <div class="metrics" aria-label="任务指标">
           <div><span>剩余时间</span><strong id="timer">02:50</strong></div>

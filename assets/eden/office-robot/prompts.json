@@ -1,0 +1,16 @@
+{
+  "durationMs": 19875.0,
+  "staticPrompt": "Continuous photorealistic low first-person camera from a moving ground robot at an office district crosswalk. The camera follows the source perspective, timing and motion. The foreground has neutral warm-gray sidewalk paving, with a dark asphalt road, white zebra stripes, a green cycle lane, signal poles, and a flat grassy horizon. Natural blue-gray clouds and restrained daylight. Retain the sources' gray vans, muted salmon sedan, pedestrians, bicycles and their locations. Keep lane geometry and signal poles aligned with the source. The robot is outside the camera's field of view. Realistic surfaces and no HUD.",
+  "dynamicPrompts": [
+    {
+      "startMs": 0.0,
+      "endMs": 16791.666666666668,
+      "text": "The small pedestrian-signal lenses at the upcoming crossing glow red."
+    },
+    {
+      "startMs": 16791.666666666668,
+      "endMs": 19875.0,
+      "text": "The small pedestrian-signal lenses at the upcoming crossing glow green."
+    }
+  ]
+}

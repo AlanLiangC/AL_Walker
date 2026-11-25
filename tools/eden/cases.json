@@ -1,0 +1,8 @@
+[
+  {"episodeId":"boulevard-01-e02","view":"chase","focus":"signal","review":"信控横道，停车后通行，转向，拖动与缩放"},
+  {"episodeId":"market-09-x04","view":"robot","focus":"pedestrian","review":"双向人潮，近处遮挡，横穿前后位置"},
+  {"episodeId":"office-09-x05","view":"chase","focus":"vehicle","review":"队首信号、停车辆数和启动次序"},
+  {"episodeId":"transit-09-x06","view":"robot","focus":"signal","review":"雨夜湿路、车辆、行人和信号颜色"},
+  {"episodeId":"school-02-x02","view":"chase","focus":"signal","review":"暴雪远处能见度与近处路缘"},
+  {"episodeId":"boulevard-08-x03","view":"robot","focus":"vehicle","review":"浓雾远处能见度与近处障碍"}
+]

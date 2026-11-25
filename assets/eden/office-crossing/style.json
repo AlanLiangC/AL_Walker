@@ -1,0 +1,11 @@
+{
+  "episodeId": "office-09-x05",
+  "robotId": "go2",
+  "cameraMode": "chase",
+  "staticPrompt": "Photorealistic continuous third-person chase camera following the same small sand-yellow Unitree Go2 quadruped from behind at an open office district crosswalk. Wet gray asphalt, white zebra stripes, a green cycle lane, natural gray paving, short roadside grass and a flat distant horizon beneath an overcast sky. Silver-gray vans and a muted salmon sedan keep their silhouettes and locations from the source. The low, smooth camera follows the source geometry and timing. Keep the four-legged robot, road layout, lamp posts and existing road users consistent. Natural road materials, soft daylight and restrained color.",
+  "signalPrompts": {
+    "stop": "At the robot's upcoming zebra crossing the pedestrian signal is red.",
+    "walk": "At the robot's upcoming zebra crossing the pedestrian signal is green."
+  },
+  "references": ["anchor.json", "../office-signal-change/anchor.json"]
+}

@@ -4,9 +4,9 @@ import { randomSource } from './math.mjs';
 
 const paint=(mesh,area,y,color,finish)=>mesh.flat(area.x1,area.z1,area.x2,area.z2,y,color,finish);
 
-function street(mesh,road,roads) {
+function street(mesh,road,roads,groundedMarkings) {
   paint(mesh,road,.002,'#515960',m.asphalt);
-  if (road.cycle) paint(mesh,road.cycle,.013,'#4d8471',m.asphalt);
+  if (road.cycle) paint(mesh,road.cycle,groundedMarkings ? .0024 : .013,'#4d8471',m.asphalt);
   const horizontal=road.axis==='h';
   const a=horizontal?road.x1:road.z1;
   const b=horizontal?road.x2:road.z2;
@@ -14,10 +14,11 @@ function street(mesh,road,roads) {
     :mesh.flat(z1,x1,z2,x2,y,tint,m.roadPaint);
   for (let p=a+1.3;p<b-2.6;p+=5.25) {
     if (roads.some(other=>other.axis!==road.axis&&Math.abs(other.center-p)<other.width*.5+3)) continue;
-    at(p,p+2.6,road.center-.043,road.center+.043,.023,'#d7ae60');
+    const paintHeight=groundedMarkings ? .0028 : .023;
+    at(p,p+2.6,road.center-.043,road.center+.043,paintHeight,'#d7ae60');
     for (const side of [-1,1]) {
       const edge=road.center+side*(road.width/2-.18);
-      at(p-.55,p+3.9,edge-.023,edge+.023,.024,'#d9d7be');
+      at(p-.55,p+3.9,edge-.023,edge+.023,groundedMarkings ? paintHeight : .024,'#d9d7be');
     }
   }
 }
@@ -94,15 +95,17 @@ function prop(mesh,item) {
   } else mesh.block(x1,0,z1,x2,height,z2,color,m.concrete);
 }
 
-function crossingPaint(mesh,c,road) {
+function crossingPaint(mesh,c,road,groundedMarkings) {
   const horizontal=road.axis==='h';
   const tint=c.mode==='guard'?'#e3c35e':'#e4e3d1';
+  const stripe=groundedMarkings ? .0032 : .029;
+  const line=groundedMarkings ? .0031 : .026;
   if (horizontal) {
-    for (let p=c.z1+.2;p<c.z2-.35;p+=.68) mesh.flat(c.x1+.12,p,c.x2-.12,p+.32,.029,tint,m.roadPaint);
-    for (const z of [c.z1-.48,c.z2+.48]) mesh.flat(c.x1,z-.082,c.x2,z+.082,.026,'#e0b56d',m.roadPaint);
+    for (let p=c.z1+.2;p<c.z2-.35;p+=.68) mesh.flat(c.x1+.12,p,c.x2-.12,p+.32,stripe,tint,m.roadPaint);
+    for (const z of [c.z1-.48,c.z2+.48]) mesh.flat(c.x1,z-.082,c.x2,z+.082,line,'#e0b56d',m.roadPaint);
   } else {
-    for (let p=c.x1+.2;p<c.x2-.35;p+=.68) mesh.flat(p,c.z1+.12,p+.32,c.z2-.12,.029,tint,m.roadPaint);
-    for (const x of [c.x1-.48,c.x2+.48]) mesh.flat(x-.082,c.z1,x+.082,c.z2,.026,'#e0b56d',m.roadPaint);
+    for (let p=c.x1+.2;p<c.x2-.35;p+=.68) mesh.flat(p,c.z1+.12,p+.32,c.z2-.12,stripe,tint,m.roadPaint);
+    for (const x of [c.x1-.48,c.x2+.48]) mesh.flat(x-.082,c.z1,x+.082,c.z2,line,'#e0b56d',m.roadPaint);
   }
 }
 
@@ -120,7 +123,7 @@ function signage(mesh,layout) {
   }
 }
 
-export function urbanMesh(layout) {
+export function urbanMesh(layout,{ groundedMarkings=false }={}) {
   const mesh=new Mesh();
   const rng=randomSource(layout.seed^0x89ee3);
   const {bounds,nodes,edges,roads}=layout;
@@ -133,8 +136,8 @@ export function urbanMesh(layout) {
     mesh.flat(a.x-1.85,a.z-1.85,b.x+1.85,b.z+1.85,-.008,pathColor,m[layout.family.surface]);
   }
   for (const zone of layout.zones) paint(mesh,zone,-.002,'#ab9980',m.paving);
-  for (const road of roads) street(mesh,road,roads);
-  for (const c of layout.crossings) crossingPaint(mesh,c,roads.find(r=>r.id===c.road));
+  for (const road of roads) street(mesh,road,roads,groundedMarkings);
+  for (const c of layout.crossings) crossingPaint(mesh,c,roads.find(r=>r.id===c.road),groundedMarkings);
   for (const water of layout.water) paint(mesh,water,-.013,'#4b7483',m.water);
   for (const area of layout.restricted) paint(mesh,area,-.004,'#b9856a',m.concrete);
   for (const item of layout.buildings) facade(mesh,item,rng);

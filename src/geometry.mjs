@@ -433,7 +433,7 @@ export function robotMesh(robot,human,phase=0) {
   return m;
 }
 
-function vehicle(m,actor) {
+function vehicle(m,actor,detail) {
   const van=actor.kind==='van';
   const l=van ? 2.33 : 2.01,w=van ? 1.02 : .92;
   const roof=van ? 2.16 : 1.48,ledge=van ? 1.01 : .85;
@@ -441,7 +441,23 @@ function vehicle(m,actor) {
   const cabBack=van ? l-.24 : l-.91, cargo=van ? l-.16 : l-.47;
   const half=w*(van?.85:.83),top=half*.86;
   const color=actor.color;
-  m.bevel(-w,.24,-l,w,ledge,l,.092,color,finish.enamel);
+  const axles=[-l+.57,l-.61];
+  if (detail) {
+    m.bevel(-w,.66,-l,w,ledge,l,.055,color,finish.enamel);
+    m.bevel(-w*.80,.28,-l+.055,w*.80,.70,l-.055,.045,'#343a3b');
+    const arch=.357;
+    const sections=[-l,...axles.flatMap(center=>Array.from({length:11},(_,i)=>center+arch*(i/5-1))),l];
+    const lower=z=>.325+Math.sqrt(Math.max(0,...axles.map(center=>arch**2-(z-center)**2)));
+    for (const side of [-1,1]) {
+      const x=side*w*.985;
+      for (let n=1;n<sections.length;n++) {
+        const a=sections[n-1],b=sections[n];
+        m.quad([x,lower(a),a],[x,lower(b),b],[x,.72,b],[x,.72,a],color,1,finish.enamel);
+      }
+    }
+  } else {
+    m.bevel(-w,.24,-l,w,ledge,l,.092,color,finish.enamel);
+  }
   m.bevel(-w*.91,.20,-l-.018,w*.91,.34,-l+.10,.04,'#272e32',finish.metal);
   m.bevel(-w*.91,.20,l-.10,w*.91,.36,l+.018,.04,'#323838',finish.metal);
   m.surface([-half,ledge,hood],[half,ledge,hood],[top,roof-.08,cabFront],[-top,roof-.08,cabFront],'#35444e',finish.glass);
@@ -455,10 +471,33 @@ function vehicle(m,actor) {
     m.tube([x,ledge,hood],[x,ledge,cargo],.019,.019,'#a3abae',8,finish.metal);
     m.bevel(x-.065,ledge-.07,cabFront-.15,x+.065,ledge+.015,cabFront+.05,.025,color,finish.enamel);
     const innerRoll=side*w*.74, outerRoll=side*w*.985;
-    for (const z of [-l+.57,l-.61]) {
+    for (const z of axles) {
       m.tube([innerRoll,.325,z],[outerRoll,.325,z],.307,.307,'#25292a',24);
       m.tube([outerRoll,.325,z],[outerRoll+side*.006,.325,z],.205,.202,'#999e9e',20,finish.metal);
       m.tube([outerRoll+side*.008,.325,z],[outerRoll+side*.015,.325,z],.079,.074,'#434b4e',12,finish.metal);
+      if (detail) {
+        const face=outerRoll+side*.017;
+        for (let hole=0;hole<8;hole++) {
+          const angle=hole*Math.PI/4;
+          const y=.325+Math.cos(angle)*.148, q=z+Math.sin(angle)*.148;
+          m.tube([face,y,q],[face+side*.004,y,q],.029,.025,'#30353a',9,finish.metal);
+        }
+      }
+    }
+    if (detail) {
+      const bodySide=side*w, join=side*.029;
+      m.tube([x,ledge,hood],[inner,roof-.07,cabFront],.018,.022,'#44484a',8,finish.metal);
+      m.tube([x,ledge,cargo],[inner,roof-.07,cabBack],.018,.022,'#44484a',8,finish.metal);
+      if (van) {
+        const end=cabFront+(cabBack-cabFront)*.29;
+        const bottom=hood+(cargo-hood)*.37;
+        m.surface([x+join,ledge,bottom],[x+join,ledge,cargo],[inner+join,roof-.075,cabBack],
+          [inner+join,roof-.075,end],color,finish.enamel);
+      }
+      for (const z of van?[hood+.14,.88]:[hood+.17,.57]) {
+        m.tube([bodySide,ledge-.05,z],[bodySide,.65,z],.0045,.0045,'#343b3e',5,finish.metal);
+        m.bevel(bodySide-.010,ledge-.105,z+.13,bodySide+.010,ledge-.079,z+.25,.005,'#77817f',finish.metal);
+      }
     }
     const lx=side*w*.70;
     m.bevel(lx-.162,ledge-.21,-l-.024,lx+.162,ledge-.065,-l+.018,.012,'#e8e5d3',finish.emitter);
@@ -469,7 +508,7 @@ function vehicle(m,actor) {
   m.block(-.17,.40,l+.018,.17,.51,l+.03,'#dad4bd');
 }
 
-export function actorMesh(actor) {
+export function actorMesh(actor,{ detail=false }={}) {
   const m=new Mesh();
   if (actor.kind==='pedestrian') {
     m.ellipsoid(0,1.119,.018,.182,.32,.122,actor.color);
@@ -502,7 +541,7 @@ export function actorMesh(actor) {
       m.tube([side*.065,.865,.057],[side*.153,.574,-.12],.078,.058,'#4f5456',9);
       m.tube([side*.153,.574,-.12],[side*.132,.395,.149],.056,.045,'#4f5456',9);
     }
-  } else vehicle(m,actor);
+  } else vehicle(m,actor,detail);
   return m;
 }
 

@@ -377,30 +377,36 @@ export class CityRenderer {
     this.draw(pose,x,y+Math.abs(cycle)*.016,z,yaw);
   }
 
-  render(engine,mode,sensor,view) {
+  displayCamera(engine,mode,sensor,view,{ rawMotion=false }={}) {
+    const p=engine.player;
+    if (mode==='robot') {
+      const viewSensor=sensor ?? engine.sensors.find(item => item.type==='rgb'||item.type==='depth');
+      const rig=rigMotion(p,engine.time,engine.domain,engine.world.surfaceAt,engine.world.bounds,Number(rawMotion));
+      const original=viewSensor ? sensorPose(p,viewSensor,rig)
+        : {x:p.x,y:p.y+engine.robot.height,z:p.z,yaw:p.yaw,pitch:0};
+      const {pose,fov}=lookAround(original,viewSensor?.fov??86,view);
+      return cameraView(pose,fov,155);
+    }
+    if (mode==='overhead') return { ...overheadOrbit(p,view),fov:85,far:245 };
+    return { ...chaseOrbit(p,view),fov:85,far:196 };
+  }
+
+  renderDisplay(engine,camera,{ width,height,showRobot,showRoute }) {
     this.selectWorld(engine.world);
-    const { clientWidth,clientHeight }=this.canvas;
-    if (!clientWidth || !clientHeight) return;
-    const ratio=Math.min(devicePixelRatio || 1,1.65);
-    const width=Math.round(clientWidth*ratio),height=Math.round(clientHeight*ratio);
     if (this.canvas.width!==width || this.canvas.height!==height) {
       this.canvas.width=width;
       this.canvas.height=height;
     }
-    const p=engine.player;
-    let camera;
-    if (mode==='robot') {
-      const viewSensor=sensor ?? engine.sensors.find(item => item.type==='rgb'||item.type==='depth');
-      const original=viewSensor ? sensorPose(p,viewSensor,rigMotion(p,engine.time,engine.domain,engine.world.surfaceAt,engine.world.bounds))
-        : {x:p.x,y:p.y+engine.robot.height,z:p.z,yaw:p.yaw,pitch:0};
-      const {pose,fov}=lookAround(original,viewSensor?.fov??86,view);
-      camera=cameraView(pose,fov,155);
-    } else if (mode==='overhead') {
-      camera={ ...overheadOrbit(p,view),fov:85,far:245 };
-    } else {
-      camera={ ...chaseOrbit(p,view),fov:85,far:196 };
-    }
-    this.drawScene(engine,camera,{ width,height,showRobot:mode!=='robot',showRoute:true });
+    this.drawScene(engine,camera,{ width,height,showRobot,showRoute });
+  }
+
+  render(engine,mode,sensor,view,size) {
+    const { clientWidth,clientHeight }=this.canvas;
+    if (!clientWidth || !clientHeight) return;
+    const ratio=Math.min(devicePixelRatio || 1,1.65);
+    const { width,height }=size??{ width:Math.round(clientWidth*ratio),height:Math.round(clientHeight*ratio) };
+    this.renderDisplay(engine,this.displayCamera(engine,mode,sensor,view),
+      { width,height,showRobot:mode!=='robot',showRoute:true });
   }
 
   grabFrame(state,sensor,pose,domain,robotId,world) {

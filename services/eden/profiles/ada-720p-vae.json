@@ -1,0 +1,1 @@
+{"backend":"edenlive","tier":"evaluation","precision":"bf16","attention":"native-sdpa","decoder":"WanVAE","decoderLatentWindow":1,"width":1280,"height":704,"fps":24,"warmMs":25000,"stallMs":6500,"maxAgeMs":12000,"cudaGraph":false,"compile":false}

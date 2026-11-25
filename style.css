@@ -50,6 +50,24 @@ h1 { font-size: clamp(1.66rem, 3vw, 2.55rem); line-height: 1.08; font-weight: 70
 .simulation, .sidebar { min-width: 0; display: grid; gap: 12px; }
 .viewport { height: clamp(410px, 61vh, 740px); position: relative; border: 1px solid #455751; overflow: hidden; border-radius: 11px; background: linear-gradient(#86b6c4 0%, #c4d9d1 66%, #bbc9bc 100%); isolation: isolate; }
 #scene { display: block; width: 100%; height: 100%; }
+[data-eden-aspect="fixed"] #scene { object-fit: contain; }
+#eden-output { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0,1fr); background: #122320; pointer-events: none; }
+#eden-output:is([data-mode="compare"],[data-mode="parallel"]) { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 2px; }
+#eden-output[hidden], #eden-controls[hidden], #eden-output:is([data-mode="enhanced"],[data-mode="photo"]) .eden-draft,
+#eden-output:is([data-mode="enhanced"],[data-mode="photo"]) span, #eden-output[data-mode="parallel"] .eden-draft canvas { display: none; }
+#viewport[data-eden-parallel] { background: #122320; }
+[data-eden-parallel] #scene { width: calc(50% - 1px); object-fit: contain; background: #122320; }
+#eden-output[data-mode="parallel"] { background: transparent; }
+#eden-output[data-mode="parallel"] .eden-main { background: #122320; border-left: 1px solid #455751; }
+#viewport[data-eden-parallel]:not([data-eden-live]) .eden-main canvas { display: none; }
+#viewport[data-eden-parallel]:not([data-eden-live]) .eden-main span { position: static; }
+#eden-output > div { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; }
+#eden-output canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+#eden-output span { position: absolute; left: 10px; bottom: 48px; background: #122320ed; color: #eff9f1; padding: 4px 8px; border-radius: 4px; font-size: .75rem; }
+#eden-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#eden-status { font-size: .8rem; color: #c5d9ce; font-variant-numeric: tabular-nums; }
+#eden-status[data-state="fallback"] { color: var(--amber); }
+[data-eden-live]:not([data-eden-parallel]) .compact-signal { visibility: hidden; }
 .scene-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #edf2ed; background: #182823; }
 .viewport-top, .viewport-bottom { position: absolute; left: 15px; right: 15px; display: flex; justify-content: space-between; align-items: start; gap: 8px; pointer-events: none; }
 .viewport-top { top: 15px; }

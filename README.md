@@ -59,7 +59,7 @@ const observation = CityNav.policy.reset({ episodeId: heldOut[0].id, robotId: 'g
 - 双击 [artillery.html](artillery.html)，即可从 Artillery Passage 北口走到南段店铺前，全程约 35 m。默认从机载相机视角开始。按 **Shift** 慢行绕过固定障碍，按 **F** 进入全屏。
 - 实景入口约 63 MB，内嵌街巷扫描与 PlayCanvas，支持新版 Chrome 或 Edge 在本地离线运行。主入口仍约 2 MB。模拟城市的「任务配置 → 仿真环境 → 城市雨夜」提供实时街灯、机器人前灯、雨幕和湿路倒影。
 - 实景 RGB 渲染的是经裁切的高斯泼溅。碰撞、示意地图、深度和 LiDAR 使用人工对齐的地面坡度、墙壁及固定障碍几何。深度帧标记为 `geometry: 'collision-proxy'`。该实景用例用于窄通道与固定障碍评测，信控与动态交通的用例仍在模拟城市。
-- 实景与城市共用 `CityNav.policy`、任务结算和轨迹导出。实景的任务 ID 为 `artillery`。
+- 实景与城市共用 `CityNav.policy`、任务结算和轨迹导出。实景的任务 ID 为 `artillery`。在机器人视角点「实景闭环」可按帧键盘驾驶，`CityNav.rendered` 可将同一状态的 PNG 交给导航器。 [接入方法](task/02-rendered-loop.md)
 
 扫描由 David Fletcher 拍摄，采用 CC BY 4.0。CityNav 从 Will Eastcott 发布的 SOG 分块中裁切街巷，并对远处区域抽样。碰撞几何和导航在 CityNav 中维护。[原始扫描](https://superspl.at/scene/f4897475) · [SOG 来源](https://github.com/willeastcott/splat-walk) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
@@ -84,6 +84,12 @@ const observation = CityNav.policy.reset({ episodeId: heldOut[0].id, robotId: 'g
 | 城市雨夜 | `night` | 湿滑路面、实时雨幕、低照度、街灯和机载前灯 |
 
 户外预设默认 RGB、深度、LiDAR 为 10 Hz，IMU 为 20 Hz，GPS 为 5 Hz。对应的默认延迟分别为 100、150、100、50 和 250 ms。每台传感器在配置中可独立设定 `rateHz`（1–20）和 `latencyMs`（0–1000）。采集和送达按 50 ms 仿真步长量化。可以用相同种子在晴天与湿滑预设间配对测试，两种预设共享随机采样的基础运动参数。
+
+## 原画与写实闭环
+
+「原画」由 CityNav 的 WebGL 渲染器绘制。「写实闭环」使用 Blender 4.5.17 LTS 的 Cycles 路径追踪。在办公区晴天的机器人第一视角，每次键盘推进等待与 CityNav 状态匹配的图像。 [启用方法、导航接口和实测](task/02-rendered-loop.md)
+
+复现 EdenLive 的增强、同帧对照和实时并排实验时，在测试页面的 URL 加入 `edenLegacy=1`。 [EdenLive 部署说明](services/eden/README.md) · [5B 画质评估](task/02-quality.md) · [机器人第一视角并排实测](task/02-robot-live.md)
 
 ## 修改源码
 

@@ -7,9 +7,11 @@ import { loadCityTextures } from './materials.mjs';
 import { CROSSING_SPEED } from './rules.mjs';
 import { robots, sensorTypes } from './sensors.mjs';
 import { option, setupEditor } from './configuration.mjs';
-import { benchmarkVersion, challengeCatalog, challengeVersion, episodeCatalog, sceneCatalog } from './scene-families.mjs';
+import { benchmarkVersion, challengeCatalog, challengeVersion, episodeCatalog, findEpisode, sceneCatalog } from './scene-families.mjs';
 import { describeUrbanEpisode } from './urban-episode.mjs';
 import { bindViewControls } from './view-controls.mjs';
+import { bindEdenView } from './eden-view.mjs';
+import { visualWeather } from './visual-state.mjs';
 
 const $=id => document.getElementById(id);
 const label=(id,text) => {
@@ -22,8 +24,10 @@ const clock = seconds => {
 
 async function boot() {
   const source=document.body.hasAttribute('data-source');
-  const scan=document.body.dataset.world==='scan' || source&&new URLSearchParams(location.search).get('scene')==='scan';
-  const engine=new CityEngine({ recordTrajectory:true,episodeId:scan?undefined:'boulevard-01-e02' },
+  const query=new URLSearchParams(location.search);
+  const scan=document.body.dataset.world==='scan' || source&&query.get('scene')==='scan';
+  const initialEpisode=source ? findEpisode(query.get('episode'))?.id : null;
+  const engine=new CityEngine({ recordTrajectory:true,episodeId:scan?undefined:initialEpisode??'boulevard-01-e02' },
     scan?alleyWorld:undefined);
   const sceneSwitch=$('scene-switch');
   if (scan) {
@@ -38,17 +42,34 @@ async function boot() {
   const renderer=scan
     ? await (await import('./scan-renderer.mjs')).ScanRenderer.create($('scene'),message => label('scene-loading',message))
     : new CityRenderer($('scene'),await loadCityTextures());
-  const keys=new Set(), pointers=new Map();
+  const keys=new Set(), frameKeys=new Set(), pointers=new Map();
   const views=[...document.querySelectorAll('[data-view]:not([hidden])')];
   const maps=[...document.querySelectorAll('[data-map]')];
   let mode='ready',view='chase',mapMode='overview',snap;
   let dirty=true,accumulator=0,last=0,lastHud=-1,lastSensor=-1,shownEvents=-1,noticeCreatedAt=-Infinity;
-  let touchSlow=false;
-  const cameraControls=bindViewControls($('scene'),()=>{ dirty=true; });
+  let touchSlow=false,inputRevision=0,appliedRevision=0;
+  let worldRevision=0,renderedPending=false,renderedLease=null;
+  const eden=bindEdenView(renderer,()=>{ dirty=true; },{scan});
+  const cameraControls=bindViewControls($('scene'),()=>{
+    dirty=true;
+    appliedRevision=++inputRevision;
+    eden?.invalidatePhoto();
+  });
   const renderSensorFrame=(state,sensor,pose) => renderer.grabFrame(state,sensor,pose,engine.domain,engine.robotId,engine.world);
+
+  function updateEden(reset=false) {
+    eden?.update({ view,mode,reset,episodeId:engine.world.episode?.id??engine.task.id,
+      sceneId:engine.world.episode?.sceneId,seed:engine.seed,robotId:engine.robotId,weather:visualWeather(engine.domain) });
+  }
+
+  function resetView() {
+    cameraControls.reset();
+    eden?.invalidate();
+  }
 
   function clearInput() {
     keys.clear();
+    frameKeys.clear();
     for (const [,button] of pointers) button.classList.remove('held');
     pointers.clear();
   }
@@ -65,9 +86,10 @@ async function boot() {
     view=value;
     selectTab(views,'view',view);
     cameraControls.select(view);
+    updateEden();
   }
 
-  function setMode(value) {
+  function setMode(value,reset=false) {
     mode=value;
     clearInput();
     accumulator=0;
@@ -79,6 +101,7 @@ async function boot() {
     label('run',command);
     label('fullscreen-run',command);
     dirty=true;
+    updateEden(reset);
   }
 
   function config() {
@@ -113,14 +136,17 @@ async function boot() {
 
   function reset(next,nextMode) {
     engine.reset(next);
+    worldRevision++;
+    renderedLease=null;
     if ($('result').open) $('result').close();
-    setMode(nextMode);
+    setMode(nextMode,true);
     refreshTask();
     return snap;
   }
 
   function step(action,ticks=1) {
     snap=engine.step(action,ticks);
+    appliedRevision=inputRevision;
     dirty=true;
     return snap;
   }
@@ -130,7 +156,8 @@ async function boot() {
   }
 
   function actionFromInput() {
-    const held=(...codes) => codes.some(code => keys.has(code)||[...pointers.values()].some(button => button.dataset.key===code));
+    const held=(...codes) => codes.some(code => keys.has(code)||frameKeys.has(code)||
+      [...pointers.values()].some(button => button.dataset.key===code));
     const cruise=held('ShiftLeft','ShiftRight')||touchSlow ? .78/engine.robot.speed : 1;
     return {
       throttle:(Number(held('KeyW','ArrowUp'))-Number(held('KeyS','ArrowDown')))*cruise,
@@ -277,7 +304,8 @@ async function boot() {
   }
 
   function runButton() {
-    if (mode==='ready'||mode==='finished'||engine.status!=='running') reset(config(),'running');
+    if (mode==='ready') setMode('running');
+    else if (mode==='finished'||engine.status!=='running') reset(config(),'running');
     else setMode(mode==='running'?'paused':'running');
     if (mode==='running') focusDriving();
   }
@@ -333,7 +361,8 @@ async function boot() {
   });
   document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click',() => $(button.dataset.close).close()));
   for (const button of views) button.addEventListener('click',() => setView(button.dataset.view));
-  $('reset-view').addEventListener('click',cameraControls.reset);
+  $('reset-view').addEventListener('click',resetView);
+  $('scene').addEventListener('dblclick',()=>eden?.invalidate());
   for (const button of maps) button.addEventListener('click',() => {
     mapMode=button.dataset.map;
     selectTab(maps,'map',mapMode);
@@ -344,28 +373,33 @@ async function boot() {
     panel.hidden=!panel.hidden;
     $('open-sensors').setAttribute('aria-expanded',String(!panel.hidden));
     lastSensor=-1;
-    if (!panel.hidden) drawSensors(performance.now());
+    if (!panel.hidden&&!renderer.capturing) drawSensors(performance.now());
   });
-  $('sensor-choice').addEventListener('change',() => { lastSensor=-1; dirty=true; });
+  $('sensor-choice').addEventListener('change',() => { lastSensor=-1; dirty=true; if (view==='robot') eden?.invalidate(); });
   $('touch-slow').addEventListener('click',() => {
     touchSlow=!touchSlow;
     $('touch-slow').setAttribute('aria-pressed',String(touchSlow));
   });
 
-  const allKeys=new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','ShiftLeft','ShiftRight','KeyC','KeyF','KeyV','Escape']);
+  const driveKeys=new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space']);
+  const allKeys=new Set([...driveKeys,'ShiftLeft','ShiftRight','KeyC','KeyF','KeyV','Escape']);
   addEventListener('keydown',event => {
     if (event.target.matches('input, select, textarea, button') && (event.code==='Space' || event.target.matches('input, select, textarea'))) return;
     if (!allKeys.has(event.code)||$('setup').open||$('result').open||event.altKey||event.metaKey||event.ctrlKey) return;
     if (event.code==='KeyF' && !event.repeat) return toggleFullscreen();
-    if (event.code==='KeyV' && !event.repeat) return cameraControls.reset();
+    if (event.code==='KeyV' && !event.repeat) return resetView();
     if (event.code==='Escape' && !event.repeat && ['paused','running'].includes(mode)) return runButton();
     if (event.code==='KeyC' && !event.repeat) return setView(views[(views.findIndex(btn => btn.dataset.view===view)+1)%views.length].dataset.view);
     if (mode!=='running') return;
     if (event.target.matches('button')) focusDriving();
+    if (!keys.has(event.code)) {
+      inputRevision++;
+      if (eden?.clocked&&driveKeys.has(event.code)) frameKeys.add(event.code);
+    }
     keys.add(event.code);
     event.preventDefault();
   });
-  addEventListener('keyup',event => keys.delete(event.code));
+  addEventListener('keyup',event => { if (keys.delete(event.code)) inputRevision++; });
   addEventListener('blur',() => { if (mode==='running') setMode('paused'); else clearInput(); });
   for (const button of document.querySelectorAll('[data-key]')) {
     button.addEventListener('pointerdown',event => {
@@ -373,10 +407,12 @@ async function boot() {
       if (mode!=='running') return;
       button.setPointerCapture(event.pointerId);
       pointers.set(event.pointerId,button);
+      if (eden?.clocked) frameKeys.add(button.dataset.key);
+      inputRevision++;
       button.classList.add('held');
     });
     function release(event) {
-      pointers.delete(event.pointerId);
+      if (pointers.delete(event.pointerId)) inputRevision++;
       if (![...pointers.values()].includes(button)) button.classList.remove('held');
     }
     button.addEventListener('lostpointercapture',release);
@@ -398,6 +434,25 @@ async function boot() {
   function policyObservation({ frames=false }={}) {
     return engine.observePolicy(frames ? renderSensorFrame : undefined);
   }
+  async function renderedObservation() {
+    requireExternal();
+    if (!eden) throw new Error('当前入口没有写实渲染端点');
+    if (renderedPending) throw new Error('已经在等待一帧写实观测');
+    const revision=worldRevision,tick=engine.ticks;
+    renderedPending=true;
+    renderedLease=null;
+    try {
+      const camera=renderer.displayCamera(engine,'robot',null,{yaw:0,pitch:0,zoom:1});
+      const frame=await eden.requestPhoto(engine,camera);
+      requireExternal();
+      if (worldRevision!==revision||engine.ticks!==tick) throw new Error('渲染期间仿真状态已改变');
+      renderedLease={id:frame.key,tick,revision};
+      return { observationId:frame.key,simTick:tick,camera,renderMs:frame.renderMs,
+        image:frame.image,observation:policyObservation() };
+    } finally {
+      renderedPending=false;
+    }
+  }
   window.CityNav=Object.freeze({
     catalog,
     reset:(next={}) => reset(next,'external'),
@@ -410,6 +465,18 @@ async function boot() {
     observe:({frames=false}={}) => {
       return engine.observe(engine.sensors,frames ? renderSensorFrame : undefined);
     },
+    rendered:Object.freeze({
+      observe:renderedObservation,
+      async step(action,{observationId,ticks=2}={}) {
+        requireExternal();
+        if (!observationId||observationId!==renderedLease?.id||renderedLease.tick!==engine.ticks||
+            renderedLease.revision!==worldRevision) throw new Error('写实观测已失效');
+        engine.advanceSteps(action,ticks);
+        renderedLease=null;
+        dirty=true;
+        return renderedObservation();
+      },
+    }),
     policy:Object.freeze({
       reset(next={},options={}) {
         reset(next,'external');
@@ -427,25 +494,38 @@ async function boot() {
 
   refreshTask();
   setMode('ready');
-  if (scan) setView('robot');
+  if (scan||source&&query.get('view')==='robot') setView('robot');
   $('scene-loading').hidden=true;
 
   function frame(now) {
     const elapsed=Math.min(.25,(now-(last||now))/1000);
     last=now;
     if (mode==='running') {
-      accumulator+=elapsed;
-      let ticks=0;
-      while (accumulator>=STEP_SECONDS) { accumulator-=STEP_SECONDS; ticks++; }
-      if (ticks) step(actionFromInput(),ticks);
+      let ticks;
+      if (eden?.clocked) {
+        accumulator=0;
+        ticks=eden.readyAt(engine.ticks)?2:0;
+      } else {
+        frameKeys.clear();
+        accumulator+=elapsed;
+        ticks=0;
+        while (accumulator>=STEP_SECONDS) { accumulator-=STEP_SECONDS; ticks++; }
+      }
+      if (ticks) {
+        step(actionFromInput(),ticks);
+        frameKeys.clear();
+      }
       if (engine.status!=='running') conclude();
     }
-    if (dirty) {
+    if (dirty||eden) {
       const sensor=selectedSensor();
-      renderer.render(engine,view,sensor && ['rgb','depth'].includes(sensor.type)?sensor:null,cameraControls.state());
+      const cameraSensor=sensor && ['rgb','depth'].includes(sensor.type)?sensor:null;
+      if (eden) eden.render(engine,cameraSensor,cameraControls.state(),now,dirty,appliedRevision);
+      else renderer.render(engine,view,cameraSensor,cameraControls.state());
     }
     if (dirty || now-lastHud>=250) updateHud(now);
-    if (!$('sensor-panel').hidden && (lastSensor<0 || (mode==='running'||mode==='external')&&now-lastSensor>=200)) drawSensors(now);
+    if (!renderer.capturing && !$('sensor-panel').hidden &&
+        (lastSensor<0 || (mode==='running'||mode==='external')&&now-lastSensor>=200)) drawSensors(now);
     dirty=false;
     requestAnimationFrame(frame);
   }

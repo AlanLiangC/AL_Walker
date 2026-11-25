@@ -154,7 +154,19 @@ export class ScanRenderer {
     entity.setEulerAngles(0,-player.yaw*180/Math.PI,0);
   }
 
+  displayCamera(engine,_mode,selected,view) {
+    const {player}=engine;
+    const rig=rigMotion(player,engine.time,engine.domain,alleyWorld.surfaceAt,alleyWorld.bounds,0);
+    const sensor=selected ?? engine.sensors.find(item => item.type==='rgb'||item.type==='depth');
+    const original=sensor ? sensorPose(player,sensor,rig) : {
+      x:player.x,y:player.y+engine.robot.height,z:player.z,yaw:player.yaw,pitch:rig.pitch,
+    };
+    const {pose,fov}=lookAround(original,sensor?.fov??86,view);
+    return cameraFromPose(pose,fov,130);
+  }
+
   render(engine,mode,selected,view) {
+    if (this.capturing) return;
     const { clientWidth,clientHeight }=this.canvas;
     if (!clientWidth||!clientHeight) return;
     const factor=clamp(devicePixelRatio||1,1,1.22);
@@ -169,7 +181,6 @@ export class ScanRenderer {
     this.goal.setPosition(gx,alleyWorld.surfaceAt(gx,gz),gz);
     this.goal.setLocalScale(.56,.56,.56);
     this.goal.enabled=true;
-    const rig=rigMotion(player,engine.time,engine.domain,alleyWorld.surfaceAt,alleyWorld.bounds);
     const pivotHeight=.67+Math.max(0,engine.robot.height-.6)*.29;
     const {eye,target}=chaseOrbit(player,view,{ distance:2.58,elevation:.23,height:pivotHeight });
     const pivot=[player.x,player.y+pivotHeight,player.z];
@@ -178,12 +189,7 @@ export class ScanRenderer {
     const direction=offset.map(value=>value/distance);
     const clearance=geometryRay(pivot,direction,distance,alleyWorld.colliders,alleyWorld.groundRay)-.12;
     if (mode==='robot'||clearance<.78) {
-      const sensor=selected ?? engine.sensors.find(item => item.type==='rgb'||item.type==='depth');
-      const original=sensor ? sensorPose(player,sensor,rig) : {
-        x:player.x,y:player.y+engine.robot.height,z:player.z,yaw:player.yaw,pitch:rig.pitch,
-      };
-      const {pose,fov}=lookAround(original,sensor?.fov??86,view);
-      this.setCamera(cameraFromPose(pose,fov,130));
+      this.setCamera(this.displayCamera(engine,mode,selected,view));
       this.showRobot(null);
     } else {
       this.setCamera({ eye:pivot.map((value,i)=>value+direction[i]*clearance),target,fov:78,range:130 });
@@ -192,32 +198,17 @@ export class ScanRenderer {
     this.app.renderNextFrame=true;
   }
 
-  grabFrame(_state,sensor,pose) {
-    if (sensor.type==='depth') return proxyDepth(sensor,pose);
+  useTarget(target,view) {
     const camera=this.camera;
     const saved={ position:camera.getPosition().clone(), rotation:camera.getRotation().clone(),
-      fov:camera.camera.fov, range:camera.camera.farClip, goal:this.goal.enabled,
+      fov:camera.camera.fov, range:camera.camera.farClip, goal:this.goal.enabled,target:camera.camera.renderTarget,
       robot:Object.keys(this.robots).find(id => this.robots[id].enabled) };
-    const data=new Uint8Array(frameWidth*frameHeight*4);
     this.goal.enabled=false;
     this.showRobot(null);
-    this.setCamera(cameraFromPose(pose,sensor.fov,sensor.range));
-    camera.camera.renderTarget=this.sensorTarget;
-    try {
-      this.app.render();
-      this.device.setRenderTarget(this.sensorTarget);
-      this.device.updateBegin();
-      const pixels=new Uint8Array(data.length);
-      this.device.readPixels(0,0,frameWidth,frameHeight,pixels);
-      this.device.updateEnd();
-      this.device.setRenderTarget(null);
-      const stride=frameWidth*4;
-      for (let y=0;y<frameHeight;y++) {
-        const from=(frameHeight-1-y)*stride;
-        data.set(pixels.subarray(from,from+stride),y*stride);
-      }
-    } finally {
-      camera.camera.renderTarget=null;
+    this.setCamera(view);
+    camera.camera.renderTarget=target;
+    return ()=>{
+      camera.camera.renderTarget=saved.target;
       camera.setPosition(saved.position);
       camera.setRotation(saved.rotation);
       camera.camera.fov=saved.fov;
@@ -225,6 +216,76 @@ export class ScanRenderer {
       this.goal.enabled=saved.goal;
       if (saved.robot) this.robots[saved.robot].enabled=true;
       this.app.renderNextFrame=true;
+    };
+  }
+
+  readTarget(target) {
+    const {width,height}=target;
+    const pixels=new Uint8Array(width*height*4);
+    this.device.setRenderTarget(target);
+    this.device.updateBegin();
+    try {
+      this.device.readPixels(0,0,width,height,pixels);
+    } finally {
+      this.device.updateEnd();
+      this.device.setRenderTarget(null);
+    }
+    const data=new Uint8Array(pixels.length),stride=width*4;
+    for (let y=0;y<height;y++) {
+      const from=(height-1-y)*stride;
+      data.set(pixels.subarray(from,from+stride),y*stride);
+    }
+    return data;
+  }
+
+  async capturePhoto(tick,view) {
+    if (this.capturing) throw new Error('已经在等待一帧实景图像');
+    const start=performance.now(),width=1280,height=704;
+    if (!this.photoTarget) {
+      const colorBuffer=new Texture(this.device,{width,height,format:PIXELFORMAT_RGBA8,mipmaps:false});
+      this.photoTarget=new RenderTarget({colorBuffer,depth:true});
+    }
+    const target=this.photoTarget,restore=this.useTarget(target,view);
+    const timeout=AbortSignal.timeout(15_000);
+    this.capturing=true;
+    let sorted,rendered,expire,pixels;
+    try {
+      pixels=await new Promise((resolve,reject)=>{
+        let ready=false;
+        sorted=this.app.systems.gsplat.on('frame:ready',(camera,_layer,isReady,loading)=>{
+          if (camera===this.camera.camera&&camera.renderTarget===target) ready=isReady&&!loading;
+        });
+        expire=()=>reject(new Error('实景渲染超时'));
+        timeout.addEventListener('abort',expire);
+        rendered=this.app.on('frameend',()=>{
+          if (!ready) return;
+          try { resolve(this.readTarget(target)); }
+          catch (error) { reject(error); }
+        });
+        this.app.renderNextFrame=true;
+      });
+    } finally {
+      sorted?.off();
+      rendered?.off();
+      timeout.removeEventListener('abort',expire);
+      restore();
+      this.capturing=false;
+    }
+    const canvas=new OffscreenCanvas(width,height);
+    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer),width,height),0,0);
+    const image=await canvas.convertToBlob({type:'image/png'});
+    return { key:crypto.randomUUID(),tick,image,renderMs:performance.now()-start };
+  }
+
+  grabFrame(_state,sensor,pose) {
+    if (sensor.type==='depth') return proxyDepth(sensor,pose);
+    const restore=this.useTarget(this.sensorTarget,cameraFromPose(pose,sensor.fov,sensor.range));
+    let data;
+    try {
+      this.app.render();
+      data=this.readTarget(this.sensorTarget);
+    } finally {
+      restore();
     }
     return { width:frameWidth,height:frameHeight,format:'rgba8',data };
   }

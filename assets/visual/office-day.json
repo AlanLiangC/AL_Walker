@@ -1,0 +1,16 @@
+{
+  "width": 1280,
+  "height": 704,
+  "samples": 16,
+  "exposure": 0.60,
+  "sky": "sky.hdr",
+  "skyStrength": 0.95,
+  "sunStrength": 1.1,
+  "textures": {
+    "1": {"asset": "aerial_asphalt_01", "meters": 2.8, "tint": 0.39},
+    "2": {"asset": "concrete_pavers", "meters": 1.9, "tint": 0.08}
+  },
+  "models": {
+    "car": {"file": "sedan-e30.glb", "yawDegrees": 180, "paint": "BMW_E30_M3_PAINT"}
+  }
+}

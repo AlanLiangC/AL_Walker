@@ -105,7 +105,7 @@ export function updateDrive(player,robot,domain,command,dt,pavedAt=pavedStreet,t
   return { speed,yawRate,sideSpeed };
 }
 
-export function rigMotion(player,time,domain,ground=surfaceAt,limits=bounds) {
+export function rigMotion(player,time,domain,ground=surfaceAt,limits=bounds,gaitScale=1) {
   if (!domain.field) return { pitch:0,bob:0 };
   const [fx,fz]=forward(player.yaw);
   const [x,z]=[player.x,player.z];
@@ -113,6 +113,6 @@ export function rigMotion(player,time,domain,ground=surfaceAt,limits=bounds) {
   const rear=ground(x-fx*.3,z-fz*.3);
   const delta=front-rear;
   const grade=contains(limits,x,z)&&Math.abs(delta)<.25 ? Math.atan2(delta,.6) : 0;
-  const gait=Math.min(1,Math.abs(player.speed))*Math.sin(player.walkPhase ?? time*10);
+  const gait=gaitScale*Math.min(1,Math.abs(player.speed))*Math.sin(player.walkPhase ?? time*10);
   return { pitch:grade+.030*gait,bob:.023*gait };
 }

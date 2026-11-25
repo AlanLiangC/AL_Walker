@@ -1,0 +1,23 @@
+{
+  "episodeId": "office-09-x05",
+  "seed": 59213517,
+  "robotId": "go2",
+  "cameraMode": "robot",
+  "weather": "day",
+  "simTick": 0,
+  "camera": {
+    "eye": [
+      -27.09333093041554,
+      0.6,
+      13.082770130245015
+    ],
+    "target": [
+      -27.09333093041554,
+      0.6,
+      14.082770130245015
+    ],
+    "fov": 86,
+    "far": 155
+  },
+  "image": "cover.png"
+}
