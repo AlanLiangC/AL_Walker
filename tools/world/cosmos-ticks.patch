@@ -1,0 +1,140 @@
+diff --git a/vllm_omni/diffusion/models/cosmos3_nano_sim_bimanual/pipeline_cosmos3_nano_sim_transfer.py b/vllm_omni/diffusion/models/cosmos3_nano_sim_bimanual/pipeline_cosmos3_nano_sim_transfer.py
+index 254424a..722b256 100644
+--- a/vllm_omni/diffusion/models/cosmos3_nano_sim_bimanual/pipeline_cosmos3_nano_sim_transfer.py
++++ b/vllm_omni/diffusion/models/cosmos3_nano_sim_bimanual/pipeline_cosmos3_nano_sim_transfer.py
+@@ -82,12 +82,14 @@ class _TransferRequestContract:
+     window_frames: int
+     sink_frames: int
+     emphasize_control_in_prompt: bool
++    live_control: bool = False
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+ class _TransferConditioning:
+     request: _TransferRequestContract
+     control_latents: torch.Tensor
++    start_frame: int = 0
+ 
+ 
+ @dataclass(frozen=True)
+@@ -109,6 +111,7 @@ class _TransferSessionFingerprint:
+     manifest_id: str
+     sampler_id: str
+     inference_id: str
++    live_control: bool = False
+ 
+ 
+ def _prompt_value(prompt_data: Any, key: str) -> Any:
+@@ -447,7 +450,9 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+     # -- Request admission ------------------------------------------------
+ 
+     def _request_controls(self, sp, extra: Mapping, typed_tick) -> _RequestControls:
+-        """Accept only offline full-clip requests; Transfer has no tick transport."""
++        """Keep a native history for CityNav requests that supply one new control block."""
++
++        live_control = extra.get("citynav_live") is True
+ 
+         if typed_tick is not None or bool(self._get_sp_param(sp, "chunk_only", False)):
+             raise ARDiffusionRequestRejectedError(
+@@ -457,12 +462,12 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+             session_id=str(extra.get("session_id") or "default"),
+             reset=bool(extra.get("reset", False)),
+             close_session=bool(extra.get("close_session", False)),
+-            tick=False,
++            tick=live_control,
+             measure_tick_latency=False,
+             domain_id=None,
+             domain_name=None,
+             frame_idx=extra.get("frame_idx"),
+-            num_latent_frames=None,
++            num_latent_frames=1 if live_control else None,
+             action=None,
+         )
+ 
+@@ -499,7 +504,6 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+     ) -> _TransferRequestContract:
+         """Validate the single control hint, clip length and history window of one request."""
+ 
+-        del controls  # Transfer controls carry no conditioning.
+         for action_key in ("action", "domain_id", "domain_name", "embodiment"):
+             if _request_value(sp, prompt_data, action_key) is not None:
+                 raise ARDiffusionRequestRejectedError(
+@@ -619,6 +623,8 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+                 f"Cosmos3-Nano-Sim-Transfer requires F >= {minimum_frames} and (F - 1) % {frame_stride} == 0 "
+                 f"pixel frames; got F={num_pixel_frames}."
+             )
++        if controls.tick and (self.manifest.chunk_size != 1 or num_pixel_frames != 1 + factor):
++            raise ARDiffusionRequestRejectedError("CityNav live control requires one context frame and four new frames.")
+         processing_frames = (num_pixel_frames - 1 + factor - 1) // factor * factor + 1
+         latent_frames = (processing_frames - 1) // factor + 1
+         required_history_frames = 2 * latent_frames + 1
+@@ -650,6 +656,7 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+             window_frames=window,
+             sink_frames=sink,
+             emphasize_control_in_prompt=emphasize,
++            live_control=controls.tick,
+         )
+ 
+     def _build_prompt_tokens(
+@@ -711,6 +718,7 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+             manifest_id=self.manifest.digest,
+             sampler_id=self.manifest.sampler_id,
+             inference_id=self.manifest.digest,
++            live_control=request.live_control,
+         )
+ 
+     def _initial_condition_latent(self, prompt_data: Any, sp, geometry: Cosmos3NanoSimBimanualGeometry) -> None:
+@@ -730,7 +738,6 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+     ) -> _TransferConditioning:
+         """Encode the control video, padded to the generated clip, into one latent per generated frame."""
+ 
+-        del start_frame  # Transfer sessions always start a fresh clip at frame 0.
+         try:
+             additional = prompt_data.get("additional_information", {}) if isinstance(prompt_data, Mapping) else {}
+             source_video = additional.get("preprocessed_transfer_video") if isinstance(additional, Mapping) else None
+@@ -764,10 +771,13 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+             control_frames = pad_temporal_frames(control_frames, request.processing_pixel_frames)
+             control_video = uint8_cthw_to_normalized_5d(control_frames, dtype=torch.float32)
+             control_latents = self._encode_video_tensor(control_video)
++            span = target_frame - start_frame if request.live_control else target_frame
++            if request.live_control:
++                control_latents = control_latents[:, :, -span:]
+             expected = (
+                 1,
+                 self.transformer.latent_channel_size,
+-                target_frame,
++                span,
+                 geometry.latent_height,
+                 geometry.latent_width,
+             )
+@@ -778,7 +788,8 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+                 )
+         except (OSError, TypeError, ValueError) as exc:
+             raise ARDiffusionRequestRejectedError(str(exc)) from exc
+-        return _TransferConditioning(request=request, control_latents=control_latents)
++        return _TransferConditioning(request=request, control_latents=control_latents,
++                                     start_frame=start_frame if request.live_control else 0)
+ 
+     # -- Dense history ----------------------------------------------------
+ 
+@@ -792,7 +803,9 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+         if self._SESSION_CAPACITY != 1:
+             raise RuntimeError("Cosmos3-Nano-Sim-Transfer joint K/V storage supports exactly one session.")
+         frames = target_frame
+-        if self.manifest.chunk_size == 1:
++        if state.fingerprint.live_control:
++            frames = state.fingerprint.window_frames
++        elif self.manifest.chunk_size == 1:
+             frames = min(frames, state.fingerprint.window_frames)
+         # Each temporal frame owns control and generated latent spans, including current scratch.
+         capacity = real_text_kv_len + 2 * frames * geometry.vision_tokens_per_frame
+@@ -848,7 +861,8 @@ class Cosmos3NanoSimTransferPipeline(Cosmos3NanoSimBimanualPipeline):
+             action_domain_ids=None,
+             null_action_frame_indexes=(),
+         )
+-        control_chunk = conditioning.control_latents[:, :, chunk_start:chunk_end]
++        offset = conditioning.start_frame
++        control_chunk = conditioning.control_latents[:, :, chunk_start - offset:chunk_end - offset]
+         forward(
+             control_chunk.to(self.dtype),
+             torch.zeros(1, device=self.device, dtype=torch.float32),

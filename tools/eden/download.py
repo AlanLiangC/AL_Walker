@@ -24,9 +24,9 @@ def request(url, headers=None, method=None):
 
 
 class RangedFile:
-    def __init__(self, root, entry, endpoint):
-        self.url = f"{endpoint}/{REPO}/resolve/{REVISION}/{quote(entry['path'])}?download=true"
-        self.resolve_ranges = endpoint != "https://huggingface.co"
+    def __init__(self, root, entry, endpoint, *, repo=REPO, revision=REVISION, download_url=None):
+        self.url = download_url or f"{endpoint}/{repo}/resolve/{revision}/{quote(entry['path'])}?download=true"
+        self.resolve_ranges = download_url is not None or endpoint != "https://huggingface.co"
         self.path = root / entry["path"]
         self.partial = self.path.with_name(self.path.name + ".partial")
         self.state = self.path.with_name(self.path.name + ".ranges")

@@ -193,26 +193,24 @@ export function setupEditor(onSubmit,world) {
     try {
       const episodeId=findEpisode(taskSelect.value)?.id;
       onSubmit({ taskId:taskSelect.value,episodeId,robotId:robotSelect.value,seed:$('seed').valueAsNumber,domain:domainSelect.value,
-        sensors:sensors.map(sensor => ({ ...sensor })) });
+        sensors:sensors.map(sensor => ({ ...sensor })) }, event.submitter?.value==='start');
     } catch (error) {
       $('config-error').textContent=error.message;
     }
   });
-  return (engine,openLibrary=false) => {
-    const suggested=openLibrary&&!engine.world.episode;
+  return engine => {
     const episode=engine.world.episode;
-    sceneSelect.value=episode?.difficulty==='extreme'?'extreme':episode?.sceneId??(suggested?sceneCatalog[0].id:'');
+    sceneSelect.value=episode?.difficulty==='extreme'?'extreme':episode?.sceneId??'';
     updateTaskOptions();
-    if (!suggested) taskSelect.value=engine.task.id;
-    else taskSelect.selectedIndex=1;
+    taskSelect.value=engine.task.id;
     robotSelect.value=previousRobot=engine.robotId;
     domainSelect.value=engine.domain.id;
     $('seed').value=engine.seed;
     sensors=structuredClone(engine.sensors);
     $('config-error').textContent='';
-    if (suggested) chooseTask();
-    else summaries();
+    summaries();
     drawSettings();
     $('setup').showModal();
+    (supportsBenchmark?sceneSelect:taskSelect).focus();
   };
 }

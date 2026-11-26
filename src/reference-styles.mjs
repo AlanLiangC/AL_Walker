@@ -1,0 +1,23 @@
+// The scene style changes appearance while CityNav supplies the camera and geometry.
+export const referenceStyles = [
+  ['daylight','自然日光',
+    'Photoreal street footage in balanced daylight. Neutral white balance, natural colors, clean exposure, realistic asphalt, masonry, and vehicle paint.'],
+  ['overcast','阴天柔光',
+    'Photoreal street footage under a bright overcast sky. Soft diffuse light, muted neutral colors, subtle shadows, and detailed dry pavement.'],
+  ['after-rain','雨后湿路',
+    'Photoreal street footage just after rain. Damp dark asphalt, subtle reflections on the existing pavement, soft cloudy daylight, and realistic glass and vehicle paint.'],
+  ['morning-mist','清晨薄雾',
+    'Photoreal street footage in cool early morning light. Thin mist softens distant buildings, with clear nearby pavement, road users, and markings.'],
+  ['midday','正午硬光',
+    'Photoreal street footage on a clear dry day at noon. Bright direct sun, short defined shadows, and fine detail in the existing road and sidewalk surfaces.'],
+  ['golden-hour','金色夕照',
+    'Photoreal street footage in late afternoon. Warm low sunlight, long soft-edged shadows, restrained golden highlights, and natural surface colors.'],
+  ['blue-hour','蓝调暮色',
+    'Photoreal street footage during blue hour. Cool twilight and soft contrast, with subtle warm light on existing windows and readable street detail.'],
+  ['rainy-night','街灯雨夜',
+    'Photoreal street footage at night after steady rain. Wet pavement reflects nearby streetlights, with controlled glare and clearly exposed nearby objects.'],
+  ['light-snow','冬日薄雪',
+    'Photoreal winter street footage in cold diffuse daylight. A light dusting of snow along existing curbs and exposed surfaces, with visible pavement edges and lane markings.'],
+  ['dry-night','暖色夜街',
+    'Photoreal dry urban street at night. Warm street lighting, dark but readable shadows, matte dry asphalt, and realistic highlights on glass and metal.'],
+];

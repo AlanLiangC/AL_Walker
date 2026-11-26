@@ -31,7 +31,8 @@ async function boot() {
     scan?alleyWorld:undefined);
   const sceneSwitch=$('scene-switch');
   if (scan) {
-    $('benchmark-library').hidden=true;
+    label('configure','任务配置');
+    label('setup-title','任务配置');
     sceneSwitch.hidden=false;
     document.title='CityNav | Artillery Passage 实景任务';
     sceneSwitch.href=source?'./':'index.html';
@@ -48,7 +49,7 @@ async function boot() {
   let mode='ready',view='chase',mapMode='overview',snap;
   let dirty=true,accumulator=0,last=0,lastHud=-1,lastSensor=-1,shownEvents=-1,noticeCreatedAt=-Infinity;
   let touchSlow=false,inputRevision=0,appliedRevision=0;
-  let worldRevision=0,renderedPending=false,renderedLease=null;
+  let worldRevision=0,renderedPending=false,renderedLease=null,renderedStream=null,renderedWorld=null;
   const eden=bindEdenView(renderer,()=>{ dirty=true; },{scan});
   const cameraControls=bindViewControls($('scene'),()=>{
     dirty=true;
@@ -100,6 +101,8 @@ async function boot() {
     const command=({ ready:'开始任务',paused:'继续任务',running:'暂停',finished:'重试任务',external:'接管任务' })[mode];
     label('run',command);
     label('fullscreen-run',command);
+    $('return-to-start').disabled=mode==='ready';
+    $('fullscreen-return-to-start').disabled=mode==='ready';
     dirty=true;
     updateEden(reset);
   }
@@ -138,6 +141,8 @@ async function boot() {
     engine.reset(next);
     worldRevision++;
     renderedLease=null;
+    renderedStream=null;
+    renderedWorld=null;
     if ($('result').open) $('result').close();
     setMode(nextMode,true);
     refreshTask();
@@ -310,10 +315,17 @@ async function boot() {
     if (mode==='running') focusDriving();
   }
 
-  const openSetup=setupEditor(next => {
-    reset({ ...next,recordTrajectory:true },'running');
+  function returnToStart() {
+    reset(config(),'ready');
+    if (document.fullscreenElement===$('viewport')) $('fullscreen-run').focus({ preventScroll:true });
+    else $('run').focus({ preventScroll:true });
+  }
+
+  const openSetup=setupEditor((next,start) => {
+    reset({ ...next,recordTrajectory:true },start?'running':'ready');
     $('setup').close();
-    focusDriving();
+    if (start) focusDriving();
+    else $('run').focus({ preventScroll:true });
   },engine.baseWorld);
   label('pass-condition',scan
     ? '在时限内进入终点绿圈，安全分至少 '+MIN_SAFETY+'，且无任何碰撞。'
@@ -322,12 +334,10 @@ async function boot() {
     if (mode==='running') setMode('paused');
     openSetup(engine);
   });
-  $('benchmark-library').addEventListener('click',()=> {
-    if (mode==='running') setMode('paused');
-    openSetup(engine,true);
-  });
   $('run').addEventListener('click',runButton);
   $('fullscreen-run').addEventListener('click',runButton);
+  $('return-to-start').addEventListener('click',returnToStart);
+  $('fullscreen-return-to-start').addEventListener('click',returnToStart);
   async function toggleFullscreen() {
     if (!document.fullscreenEnabled) return;
     try {
@@ -434,7 +444,7 @@ async function boot() {
   function policyObservation({ frames=false }={}) {
     return engine.observePolicy(frames ? renderSensorFrame : undefined);
   }
-  async function renderedObservation() {
+  async function renderedObservation({method,style,styleSeed}={}) {
     requireExternal();
     if (!eden) throw new Error('当前入口没有写实渲染端点');
     if (renderedPending) throw new Error('已经在等待一帧写实观测');
@@ -443,12 +453,17 @@ async function boot() {
     renderedLease=null;
     try {
       const camera=renderer.displayCamera(engine,'robot',null,{yaw:0,pitch:0,zoom:1});
-      const frame=await eden.requestPhoto(engine,camera);
+      const session=renderedWorld&&(!method||method===renderedWorld.method)?renderedWorld:null;
+      const frame=style!==undefined?await eden.requestWorld(engine,camera,{method,style,styleSeed}):
+        session?await eden.requestWorld(engine,camera,session):
+          await eden.requestPhoto(engine,camera,method,renderedStream??=crypto.randomUUID());
       requireExternal();
       if (worldRevision!==revision||engine.ticks!==tick) throw new Error('渲染期间仿真状态已改变');
-      renderedLease={id:frame.key,tick,revision};
-      return { observationId:frame.key,simTick:tick,camera,renderMs:frame.renderMs,
-        image:frame.image,observation:policyObservation() };
+      renderedLease={id:frame.key,tick,revision,method:frame.method};
+      renderedWorld=frame.sessionId?{method:frame.method,sessionId:frame.sessionId,
+        referenceSha256:frame.referenceSha256}:null;
+      return { observationId:frame.key,simTick:tick,camera,method:frame.method,renderMs:frame.renderMs,
+        image:frame.image,observation:policyObservation(),...(renderedWorld??{}) };
     } finally {
       renderedPending=false;
     }
@@ -466,15 +481,29 @@ async function boot() {
       return engine.observe(engine.sensors,frames ? renderSensorFrame : undefined);
     },
     rendered:Object.freeze({
+      start:renderedObservation,
       observe:renderedObservation,
+      async openLive({method,style,styleSeed}={}) {
+        requireExternal();
+        if (!eden) throw new Error('当前入口没有写实渲染端点');
+        if (renderedPending) throw new Error('已经在等待写实观测');
+        const camera=renderer.displayCamera(engine,'robot',null,{yaw:0,pitch:0,zoom:1});
+        renderedPending=true;
+        try {
+          return await eden.openLive(engine,camera,{method,style,styleSeed},()=>policyObservation());
+        } finally {
+          renderedPending=false;
+        }
+      },
       async step(action,{observationId,ticks=2}={}) {
         requireExternal();
         if (!observationId||observationId!==renderedLease?.id||renderedLease.tick!==engine.ticks||
             renderedLease.revision!==worldRevision) throw new Error('写实观测已失效');
+        const {method}=renderedLease;
         engine.advanceSteps(action,ticks);
         renderedLease=null;
         dirty=true;
-        return renderedObservation();
+        return renderedObservation({method});
       },
     }),
     policy:Object.freeze({

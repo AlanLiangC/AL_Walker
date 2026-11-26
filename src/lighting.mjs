@@ -1,9 +1,31 @@
 import { streetLamps } from './city.mjs';
+import { layoutClass as label, materialStride } from './render-layout.mjs';
 
 const SKY_U_SUN=.612793;
 const elevation=.44;
 const azimuth=1.08;
 export const sun=[Math.cos(elevation)*Math.cos(azimuth),Math.sin(elevation),Math.cos(elevation)*Math.sin(azimuth)];
+
+const PHOTO = `
+  uniform bool uPhoto;
+  uniform sampler2D uPhotoColor, uPhotoDepth;
+  uniform mat4 uPhotoVP;
+  const vec3 MM=vec3(255.0, 65280.0, 16711680.0)*.001;
+  float insidePhoto(vec2 uv) {
+    vec2 edge=min(uv,1.0-uv);
+    return smoothstep(.008,.085,min(edge.x,edge.y));
+  }
+  vec3 projectedColor(vec3 rgb,vec4 clip,bool sky,float amount) {
+    if (!uPhoto||clip.w<=.05) return rgb;
+    vec2 coord=clip.xy/clip.w*.5+.5;
+    float edge=insidePhoto(coord);
+    if (edge<=0.0) return rgb;
+    float z=dot(texture2D(uPhotoDepth,coord).rgb,MM);
+    float tolerance=min(.32,.06+.012*clip.w);
+    float visible=sky ? step(z,.002):step(.002,z)*(1.0-smoothstep(tolerance,2.0*tolerance,abs(z-clip.w)));
+    return mix(rgb,texture2D(uPhotoColor,vec2(coord.x,1.0-coord.y)).rgb,amount*edge*visible);
+  }
+`;
 
 const SKY = `
   uniform sampler2D uSky;
@@ -44,9 +66,11 @@ export const skyFragment = `
   varying vec2 vScreen;
   uniform vec3 uCameraX, uCameraY, uCameraZ;
   ${SKY}
+  ${PHOTO}
   void main() {
     vec3 ray=normalize(uCameraZ+vScreen.x*uCameraX+vScreen.y*uCameraY);
-    gl_FragColor=vec4(skyColor(ray),1.0);
+    vec3 sky=projectedColor(skyColor(ray),uPhotoVP*vec4(ray,0.0),true,.94);
+    gl_FragColor=vec4(sky,1.0);
   }
 `;
 
@@ -65,7 +89,7 @@ export const geometryVertex = `
     vec3 p=aPoint*uScale;
     vec3 n=aNormal/uScale;
     vWorld=uPosition+vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
-    if (aMaterial==11.0) {
+    if (mod(aMaterial,${materialStride}.0)==11.0) {
       float breeze=sin(uTime*1.8+vWorld.x*.27+vWorld.z*.22);
       vWorld.x+=breeze*.046;
       vWorld.z+=breeze*.025;
@@ -80,7 +104,7 @@ export const geometryVertex = `
   }
 `;
 
-export const geometryFragment = hasGradient => `
+export const geometryFragment = (hasGradient,hasProjection) => `
   ${hasGradient ? '#extension GL_OES_standard_derivatives : enable\n#extension GL_EXT_shader_texture_lod : enable' : ''}
   precision highp float;
   varying vec3 vColor, vWorld, vNormal;
@@ -90,11 +114,13 @@ export const geometryFragment = hasGradient => `
   uniform mat4 uSunVP, uReflectionVP;
   uniform float uShadowTexel, uTime;
   uniform int uPass;
+  uniform float uSemantic;
   uniform bool uReflect;
   uniform float uSnow;
   uniform vec3 uLanterns[${streetLamps.length}],uHeadlamp,uAhead;
   uniform sampler2D uAlbedo, uRelief, uLeaves, uSign, uShadow, uReflection;
   ${SKY}
+  ${hasProjection?PHOTO:''}
 
   float hash(vec2 p) {
     vec3 q=fract(vec3(p.xyx)*0.1031);
@@ -160,7 +186,11 @@ export const geometryFragment = hasGradient => `
   }
 
   void main() {
-    float mat=floor(vMaterial+.5);
+    float packedId=floor(vMaterial+.5);
+    float materialId=mod(packedId,${materialStride}.0);
+    bool paint=materialId==16.0;
+    bool vehicleSurface=materialId>16.5;
+    float mat=paint ? 9.0 : materialId-(vehicleSurface ? 17.0 : 0.0);
     if (uPass==3&&vWorld.y<.17) discard;
     vec4 leaf=vec4(1.0);
     if (mat==11.0) {
@@ -175,8 +205,22 @@ export const geometryFragment = hasGradient => `
       gl_FragColor=vec4(encode(clamp(floor(vDepth*1000.0+.5),1.0,16777215.0)),1.0);
       return;
     }
+    if (uPass==4) {
+      float category=uSemantic>=0.0 ? uSemantic : floor(packedId/${materialStride}.0);
+      if (uSemantic<0.0&&category==0.0) {
+        category=${label.building}.0;
+        if (mat==1.0||mat==7.0) category=${label.road}.0;
+        if (mat==2.0) category=${label.sidewalk}.0;
+        if (mat==3.0||mat==12.0) category=${label.terrain}.0;
+        if (mat==5.0||mat==11.0) category=${label.vegetation}.0;
+        if (mat==15.0) category=${label.pole}.0;
+        if (mat==13.0) category=${label.sign}.0;
+      }
+      gl_FragColor=vec4(vec3(category/255.0),1.0);
+      return;
+    }
 
-    vec3 base=vColor*uTint;
+    vec3 base=vehicleSurface ? vColor : vColor*uTint;
     float rough=.77, metal=0.0;
     vec3 geometric=normalize(vNormal);
     vec3 view=normalize(uEye-vWorld);
@@ -284,7 +328,15 @@ export const geometryFragment = hasGradient => `
     float fog=1.0-exp(-pow(vDepth/max(3.0,uWeather.y),1.33));
     vec3 viewSky=mix(horizon,vec3(.49,.64,.77),max(-view.y,0.0));
     vec3 rgb=displayMap(lit*uWeather.x);
-    gl_FragColor=vec4(mix(rgb,mix(horizon,viewSky,uNight?.02:.35),fog*.93),1.0);
+    rgb=mix(rgb,mix(horizon,viewSky,uNight?.02:.35),fog*.93);
+    ${hasProjection?`if (uPhoto && (mat<=7.0||mat==11.0)) {
+      vec4 photoClip=uPhotoVP*vec4(vWorld,1.0);
+      // Fine near-field surfaces need the asset texture when a distant photo
+      // texel would cover many pixels in the current camera.
+      float footprint=smoothstep(.54,.94,vDepth/max(.05,photoClip.w));
+      rgb=projectedColor(rgb,photoClip,false,.83*footprint)*mix(.83,1.0,direct);
+    }`:''}
+    gl_FragColor=vec4(rgb,1.0);
   }
 `;
 

@@ -23,13 +23,37 @@ async def run(args):
           });
         """)
         path = "/src/?scene=scan" if args.scan else "/src/?eden=/eden&episode=office-09-x05&view=robot"
-        await page.goto(args.url + path + "&edenDiagnostics=1")
+        await page.goto(args.url + path + "&edenDiagnostics=1&renderBench=1")
         button = page.locator("[data-eden=photo]")
         if not args.scan:
             await button.wait_for(state="visible",timeout=20_000)
             assert await page.locator("#eden-controls [data-eden]:visible").all_text_contents() == ["原画", "写实闭环"]
+            assert await page.locator("#photo-method").is_hidden()
             assert await page.locator("#scene-switch").is_hidden()
         await button.click(timeout=20_000)
+        if not args.scan:
+            methods = await page.locator("#photo-method option").evaluate_all(
+                "(options)=>options.map(option=>option.value)"
+            )
+            assert set(("cycles", "edenlive", "qwen-image", "difix", "sdxl-depth", "wan-vace")) <= set(methods)
+            await page.locator("#photo-method").select_option("cycles")
+        if args.method:
+            await page.locator("#photo-method").select_option(args.method)
+            await page.wait_for_function("(method)=>photoLog.at(-1)?.method===method",
+                                         arg=args.method, timeout=420_000)
+            await page.screenshot(path=args.output / "method.png")
+            result = await page.evaluate("""async method=>{
+              CityNav.policy.reset({episodeId:'office-09-x05'});
+              const first=await CityNav.rendered.observe({method});
+              const next=await CityNav.rendered.step({throttle:.5},{observationId:first.observationId,ticks:2});
+              return [first,next].map(frame=>({method:frame.method,tick:frame.simTick,bytes:frame.image.size}));
+            }""", args.method)
+            assert [frame["tick"] for frame in result] == [0, 2]
+            assert all(frame["method"] == args.method and frame["bytes"] > 10_000 for frame in result)
+            (args.output / "method.json").write_text(json.dumps(result, indent=2) + "\n")
+            print("Verified browser closed loop with", args.method)
+            await browser.close()
+            return
         await page.wait_for_function("photoLog.length>0", timeout=130_000)
         await page.screenshot(path=args.output / "keyboard-start.png")
         after_first_request = asyncio.Event()
@@ -162,4 +186,5 @@ if __name__ == "__main__":
     parser.add_argument("--url", default="http://127.0.0.1:8771")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scan", action="store_true")
+    parser.add_argument("--method")
     asyncio.run(run(parser.parse_args()))

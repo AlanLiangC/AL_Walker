@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frames", type=int, nargs="+", default=[0, 32, 120, 392, 408, 468])
     parser.add_argument("--width", type=int, default=640)
+    parser.add_argument("--height", type=int, help="Fit each view into this height to compare different aspect ratios")
     parser.add_argument("--video", action="store_true")
     parser.add_argument("inputs", type=Path, nargs="+")
     args = parser.parse_args()
@@ -26,6 +27,9 @@ def main():
         parser.error("Provide at least two videos")
     args.output.mkdir(parents=True, exist_ok=True)
     size = f"{args.width}:-2:flags=lanczos"
+    if args.height:
+        size = (f"{args.width}:{args.height}:flags=lanczos:force_original_aspect_ratio=decrease:"
+                f"force_divisible_by=2,pad={args.width}:{args.height}:(ow-iw)/2:(oh-ih)/2")
     n = len(args.inputs)
     stack = "".join(f"[v{i}]" for i in range(n)) + f"hstack=inputs={n}:shortest=1"
     scale = [f"[{i}:v]scale={size}[v{i}]" for i in range(n)]

@@ -1,0 +1,1 @@
+{"backend":"edenlive","tier":"evaluation","precision":"fp8","fp8":true,"attention":"native-sdpa","decoder":"LightTAE","width":1280,"height":704,"fps":24,"warmMs":25000,"stallMs":6500,"maxAgeMs":12000,"cudaGraph":false,"compile":false}

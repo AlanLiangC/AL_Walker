@@ -8,6 +8,9 @@ export function visualState(engine,camera) {
   const {world}=engine;
   return {
     scene:world.episode?.sceneId,
+    episodeId:world.episode?.id,
+    robotId:engine.robotId,
+    seed:engine.seed,
     weather:visualWeather(engine.domain),
     tick:engine.ticks,
     camera,

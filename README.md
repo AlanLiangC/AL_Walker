@@ -2,7 +2,9 @@
 
 在 Finder 中双击根目录的 [index.html](index.html)，用 Chrome、Edge 或 Safari 打开。页面可离线运行，无需启动服务器。[dist/index.html](dist/index.html) 是同一份单文件入口。在 IDE 中点击 HTML 链接可能只会打开源码标签页。
 
-点击 **任务配置** 选择路线、机器人、仿真环境、场景随机种子和传感器。默认装载 Go2 参考型的 RGB 相机、2D LiDAR、IMU 和 GPS。可以安装多个同类型传感器。
+打开 **场景与任务**，先选街区，再选该街区的任务路线，也可调整机器人、仿真环境、随机种子和传感器。默认装载 Go2 参考型的 RGB 相机、2D LiDAR、IMU 和 GPS。可以安装多个同类型传感器。
+
+**加载到起点** 应用配置，把机器人放到所选路线的起点并停在「待出发」。准备好后点 **开始任务**，也可以在配置窗口直接选择 **加载并开始**。驾驶中点 **暂停** 可以稍后继续，点 **回到起点** 则保留配置，重置位置、计时和本次驾驶记录。全屏时也可暂停或回到起点。
 
 | 操作 | 键盘 |
 | --- | --- |
@@ -11,7 +13,7 @@
 | 慢行至约 0.78 m/s | Shift |
 | 制动 | 空格 |
 | 追踪、机器人、俯视 | C 或视角按钮 |
-| 复位当前视角 | V 或画面右上角的「复位」 |
+| 复位当前视角 | V 或画面右上角的「复位视角」 |
 | 全屏驾驶 | F 或画面右上角的「全屏」 |
 | 暂停、继续 | Esc |
 
@@ -21,7 +23,7 @@
 
 ## 模拟城市基准集
 
-根目录入口默认打开「城市主干道 · 中心街坊」的通勤任务，点击 **场景库** 切换。每个场景包含 20 条固定 Episode。通过场景下拉框中的「经典城区」可访问原有 4 条路线。
+根目录入口默认打开「城市主干道 · 中心街坊」的通勤任务。在 **场景与任务** 中切换街区，每个场景包含 20 条固定 Episode。通过场景下拉框中的「经典城区」可访问原有 4 条路线。
 
 - **108 个场景**来自 12 类街区，每类 9 个布局。包括主干道、老城窄巷、校门、公交换乘站、施工区、公园、滨水栈道、市场、医院、办公区、共享校园和物流园。布局变化涉及道路位置与宽度、封闭路段、横道类型、限速区、建筑与设施。
 - **2,160 条 Episode**使用同一场景中不同的有方向起终点。任务分布包括高峰、低流量、配送车辆、密集行人、错峰信号、湿地、夜间和限时；每条任务记录随机种子、天气、时限及参考路线。
@@ -41,7 +43,7 @@ const observation = CityNav.policy.reset({ episodeId: heldOut[0].id, robotId: 'g
 
 ### 极限挑战
 
-点击 **场景库** 打开任务配置，再从场景库下拉框选择 **极限挑战**。其中有 48 条 Episode，每类 8 条。挑战沿用已有场景的训练、验证和测试划分。横穿人流、车辆间距与传感器扰动按种子复现。
+在 **场景与任务** 的场景下拉框选择 **极限挑战**。其中有 48 条 Episode，每类 8 条。挑战沿用已有场景的训练、验证和测试划分。横穿人流、车辆间距与传感器扰动按种子复现。
 
 | 挑战 | Episode 示例 | 任务条件 |
 | --- | --- | --- |
@@ -57,7 +59,7 @@ const observation = CityNav.policy.reset({ episodeId: heldOut[0].id, robotId: 'g
 ## 伦敦实景与城市雨夜
 
 - 双击 [artillery.html](artillery.html)，即可从 Artillery Passage 北口走到南段店铺前，全程约 35 m。默认从机载相机视角开始。按 **Shift** 慢行绕过固定障碍，按 **F** 进入全屏。
-- 实景入口约 63 MB，内嵌街巷扫描与 PlayCanvas，支持新版 Chrome 或 Edge 在本地离线运行。主入口仍约 2 MB。模拟城市的「任务配置 → 仿真环境 → 城市雨夜」提供实时街灯、机器人前灯、雨幕和湿路倒影。
+- 实景入口约 63 MB，内嵌街巷扫描与 PlayCanvas，支持新版 Chrome 或 Edge 在本地离线运行。主入口仍约 2 MB。模拟城市的「场景与任务 → 仿真环境 → 城市雨夜」提供实时街灯、机器人前灯、雨幕和湿路倒影。
 - 实景 RGB 渲染的是经裁切的高斯泼溅。碰撞、示意地图、深度和 LiDAR 使用人工对齐的地面坡度、墙壁及固定障碍几何。深度帧标记为 `geometry: 'collision-proxy'`。该实景用例用于窄通道与固定障碍评测，信控与动态交通的用例仍在模拟城市。
 - 实景与城市共用 `CityNav.policy`、任务结算和轨迹导出。实景的任务 ID 为 `artillery`。在机器人视角点「实景闭环」可按帧键盘驾驶，`CityNav.rendered` 可将同一状态的 PNG 交给导航器。 [接入方法](task/02-rendered-loop.md)
 
@@ -87,7 +89,16 @@ const observation = CityNav.policy.reset({ episodeId: heldOut[0].id, robotId: 'g
 
 ## 原画与写实闭环
 
-「原画」由 CityNav 的 WebGL 渲染器绘制。「写实闭环」使用 Blender 4.5.17 LTS 的 Cycles 路径追踪。在办公区晴天的机器人第一视角，每次键盘推进等待与 CityNav 状态匹配的图像。 [启用方法、导航接口和实测](task/02-rendered-loop.md)
+在项目根目录运行 `bash tools/visual/run.sh`，打开 [CityNav 机器人视角](http://127.0.0.1:8771/)。选好任务后点「写实闭环」，五个渲染器共用同一个下拉框。
+
+- 「EdenLive · 连续写实」用于持续键盘驾驶。`CityNav.rendered.openLive()` 提供 PNG 和同一仿真步的观测。 [启动、导航接口和延迟实测](task/02-realtime.md)
+- 「Cosmos3 · 深度写实」用 CityNav 深度生成参考帧，并在动作后更新画面。`CityNav.rendered.start()` 默认选择该逐步渲染器。 [模型部署与实测结果](task/02-reference-world.md)
+- 「REGEN FLUX · 连续写实」使用固定风格，选中即开始出画。`CityNav.rendered.openLive({method:'regen'})` 可用于导航器。
+- 「Pix2Pix-Turbo · 语义写实」从语义轮廓与风格提示生成画面。「Apple SHARP · 高斯写实」从场景参考图重建静态布景，并按 CityNav 位姿更新画面和动态体。 [布局导出及渲染器对照](task/02-realtime.md#布局导出及三种渲染器)
+
+需要参考帧的渲染器提供十个可编辑的风格预设和自定义输入。选好风格后点「生成参考帧」。
+
+「原画」显示 CityNav 的 WebGL 画面。使用 `edenCompare=1` 可并排看原画和写实画面。Blender Cycles、SolarRenderer 等实验方法通过 `renderBench=1` 打开。 [Cycles 闭环及基准](task/02-rendered-loop.md) · [五种生成方法](task/02-generative-methods.md)
 
 复现 EdenLive 的增强、同帧对照和实时并排实验时，在测试页面的 URL 加入 `edenLegacy=1`。 [EdenLive 部署说明](services/eden/README.md) · [5B 画质评估](task/02-quality.md) · [机器人第一视角并排实测](task/02-robot-live.md)
 

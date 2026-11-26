@@ -1,5 +1,6 @@
 import { randomSource } from './math.mjs';
 import { material } from './materials.mjs';
+import { materialStride } from './render-layout.mjs';
 import { sign, streetDetails } from './street-detail.mjs';
 import {
   bounds, buildings, construction, crossings, cycleLane, furniture, GOAL_RADIUS, lightPoles, localWalk,
@@ -14,6 +15,7 @@ function rgb(hex) {
 
 export class Mesh {
   data = [];
+  semantic = 0;
 
   triangle(a,b,c,tint,shade=1,finish=material.plain,uv=[[0,0],[0,0],[0,0]]) {
     const color=rgb(tint).map(channel => channel*shade);
@@ -23,7 +25,8 @@ export class Mesh {
     const length=Math.hypot(...normal);
     if (length<1e-9) return;
     const n=normal.map(value => value/length);
-    for (const [i,point] of [a,b,c].entries()) this.data.push(...point,...color,...n,finish,...uv[i]);
+    const packedMaterial=finish+this.semantic*materialStride;
+    for (const [i,point] of [a,b,c].entries()) this.data.push(...point,...color,...n,packedMaterial,...uv[i]);
   }
 
   quad(a,b,c,d,tint,shade=1,finish=material.plain) {

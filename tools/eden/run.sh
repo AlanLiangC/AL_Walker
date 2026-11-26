@@ -6,10 +6,19 @@ if [ ! -x "$EDEN_PY" ] || [ ! -d "$PYTHONPATH/aiortc" ]; then
   >&2 echo "Prepare the project runtime with bash tools/eden/prepare.sh env"
   exit 1
 fi
+if [ -d "$CITYNAV_EDEN_ROOT/realtime/python/sageattention" ]; then
+  export PYTHONPATH="$CITYNAV_EDEN_ROOT/realtime/python:$PYTHONPATH"
+fi
 profile="${1:-passthrough}"
 if [ "$#" -gt 0 ]; then shift; fi
 if [ "$profile" = passthrough ]; then
   exec "$EDEN_PY" -u -m services.eden.server --profile "$profile" "$@"
+fi
+if [ "$profile" = regen ]; then
+  regen="$CITYNAV_EDEN_ROOT/world/alternatives"
+  test -s "$regen/models/regen/flux.pth"
+  exec "$EDEN_PY" -u -m services.eden.server --profile regen \
+    --source "$regen/regen-native" --weights "$regen/models/regen/flux.pth" "$@"
 fi
 if [ "$#" -eq 0 ]; then
   >&2 echo "Pass --gpu INDEX or --gpu GPU-UUID for each model worker"

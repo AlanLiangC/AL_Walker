@@ -65,6 +65,9 @@ h1 { font-size: clamp(1.66rem, 3vw, 2.55rem); line-height: 1.08; font-weight: 70
 #eden-output canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
 #eden-output span { position: absolute; left: 10px; bottom: 48px; background: #122320ed; color: #eff9f1; padding: 4px 8px; border-radius: 4px; font-size: .75rem; }
 #eden-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+#photo-method, #reference-style { width: auto; max-width: 100%; }
+#reference-controls { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; }
+#reference-controls textarea { flex: 1 1 240px; min-width: 0; resize: vertical; color: inherit; background: #1e3028; border: 1px solid #3b5346; border-radius: 5px; padding: 7px 9px; font: inherit; }
 #eden-status { font-size: .8rem; color: #c5d9ce; font-variant-numeric: tabular-nums; }
 #eden-status[data-state="fallback"] { color: var(--amber); }
 [data-eden-live]:not([data-eden-parallel]) .compact-signal { visibility: hidden; }
@@ -103,7 +106,7 @@ h1 { font-size: clamp(1.66rem, 3vw, 2.55rem); line-height: 1.08; font-weight: 70
   background: #122320ed;
   font-size: .81rem;
 }
-.immersive-controls button { padding: 4px 7px; border: 0; border-radius: 4px; color: #102b20; background: var(--accent); }
+.immersive-controls .button { min-height: 32px; padding: 4px 7px; border-radius: 4px; font-size: inherit; }
 .viewport:fullscreen #open-sensors { visibility: hidden; }
 .viewport:fullscreen .compact-signal {
   display: block;
@@ -181,6 +184,7 @@ dialog::backdrop { background: #0a1412c0; }
 .setup-domain { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(130px, .38fr) 1fr; align-items: center; column-gap: 13px; }
 .setup-domain > label { grid-column: 1 / -1; }
 .setup-domain p { margin: 0; }
+#benchmark-picker { grid-template-columns: minmax(0, 1fr) auto; }
 label { display: block; color: #c9d9ce; font-size: .83rem; margin: 0 0 5px; }
 select, input { width: 100%; min-width: 0; color: #e8f1ea; background: #1e3028; border: 1px solid #3b5346; border-radius: 5px; padding: 6px 8px; font-size: .87rem; min-height: 32px; }
 select { appearance: none; padding-right: 24px; background-image: linear-gradient(45deg, transparent 50%, #abc3b5 50%),linear-gradient(135deg, #abc3b5 50%, transparent 50%); background-position: right 12px center, right 7px center; background-size: 5px 5px; background-repeat: no-repeat; }
@@ -188,6 +192,8 @@ select { appearance: none; padding-right: 24px; background-image: linear-gradien
 .setup-overview small { color: #99b6a7; }
 .setup-sensor-title, .dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 13px; }
 .dialog-actions { justify-content: flex-end; }
+#setup { padding-bottom: 0; scroll-padding-bottom: 64px; }
+.setup-actions { position: sticky; bottom: 0; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); background: #17231f; }
 #config-error { color: #ffa48e; font-size: .82rem; margin-right: auto; }
 .sensor-setting { margin: 7px 0; }
 .sensor-setting summary { cursor: pointer; font-size: .88rem; color: var(--accent); }
@@ -215,11 +221,15 @@ select { appearance: none; padding-right: 24px; background-image: linear-gradien
   .compact-signal[data-state="yield"] { color: var(--amber); }
   .notice { top: 117px; }
 }
+@media (max-width: 680px) {
+  .brand-divider, .brand-description { display: none; }
+}
 @media (max-width: 520px) {
-  .bar { gap: 6px; }
+  .bar { gap: 6px; flex-wrap: wrap; }
   .brand, .bar-actions { gap: 6px; }
+  .bar-actions { flex-wrap: wrap; justify-content: flex-end; margin-inline-start: auto; }
   .bar-actions .button { padding-inline: 8px; }
-  .brand-divider, .brand-description, .state { display: none; }
+  .state { display: none; }
   .heading { align-items: start; flex-direction: column; }
   .sidebar { grid-template-columns: 1fr; }
   .viewport-top, .viewport-bottom { left: 7px; right: 7px; }
@@ -236,6 +246,7 @@ select { appearance: none; padding-right: 24px; background-image: linear-gradien
   .metrics strong { font-size: 1.16rem; }
   .metrics small { font-size: .64rem; }
   .setup-overview { grid-template-columns: 1fr; }
+  .setup-domain, #benchmark-picker { grid-template-columns: 1fr; }
   .sensor-row { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
 .signal[data-state="full-stop"] i, .compact-signal[data-state="full-stop"] { color: #f0b782; }

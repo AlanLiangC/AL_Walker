@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CityEngine } from '../../src/engine.mjs';
-import { actorMesh, pedestrianLeg } from '../../src/geometry.mjs';
+import { actorMesh, Mesh, pedestrianLeg } from '../../src/geometry.mjs';
 import { urbanMesh } from '../../src/urban-geometry.mjs';
 
 const [episodeId,directory]=process.argv.slice(2);
@@ -20,9 +20,11 @@ for (const actor of engine.actors) {
 }
 const {layout}=engine.world;
 const posts=layout.posts.filter(post=>!['stop','yield'].includes(layout.crossings.find(c=>c.id===post.crossing).mode));
+const signMesh=new Mesh();
 const bundle={
   scene:engine.world.episode.sceneId,
-  world:saveMesh('world.f32',urbanMesh(layout,{groundedMarkings:true})),
+  world:saveMesh('world.f32',urbanMesh(layout,{groundedMarkings:true,signMesh})),
+  signs:saveMesh('signs.f32',signMesh),
   actors,
   legs:[-1,-.5,0,.5,1].map((swing,index)=>saveMesh('legs-'+index+'.f32',pedestrianLeg(swing))),
   posts,

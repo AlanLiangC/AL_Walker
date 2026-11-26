@@ -1,0 +1,12 @@
+{
+  "prompt": "A photorealistic first-person photograph from a low camera in a modern office district on an ordinary sunny day. Refine natural lighting and surface detail. Keep the foreground gray concrete pavers and the dark asphalt on the road. Retain the exact framing, curb edges, pavement boundaries, lane markings, traffic lights, road users and their positions. No text overlays, extra objects or additional traffic signals.",
+  "negative": "CGI, game render, cartoon, neon, newly added traffic, extra traffic signals, lens flares, text overlay",
+  "seed": 26298,
+  "methods": {
+    "edenlive": {"label": "EdenLive 5B", "timeout": 200, "profile": "ada-640x352-24", "anchor": "../eden/office-robot/anchor.json"},
+    "qwen-image": {"label": "Qwen-Image 2.1", "steps": 28, "timeout": 300},
+    "difix": {"label": "Difix3D+", "timeout": 90},
+    "sdxl-depth": {"label": "SDXL Depth ControlNet", "steps": 28, "strength": 0.50, "timeout": 120},
+    "wan-vace": {"label": "Wan2.1 VACE 1.3B", "steps": 25, "control": "rgb", "controlScale": 0.5, "timeout": 240, "anchor": "../eden/office-robot/anchor.json"}
+  }
+}

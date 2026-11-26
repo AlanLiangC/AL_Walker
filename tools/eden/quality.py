@@ -29,7 +29,11 @@ def run(args):
     sys.path.insert(0, str(args.source.resolve()))
     from edenlive.data.recording_manifest import prompt_schedule
 
-    schedule = prompt_schedule(metadata, args.frames, dynamic=args.events)
+    chunk_size = profile.get("latentChunk", 3)
+    group = 4 * chunk_size
+    if args.frames < group - 3 or (args.frames + 3) % group:
+        raise ValueError(f"Frame count requires {group - 3} plus a multiple of {group}")
+    schedule = prompt_schedule(metadata, args.frames, dynamic=args.events, chunk_size=chunk_size)
     source = args.recording / "recording.mp4"
     anchor_path = args.recording / args.anchor
     with Image.open(anchor_path) as image:
@@ -47,7 +51,7 @@ def run(args):
         stream.pix_fmt = "yuv420p"
         stream.options = {"crf": "14", "preset": "fast"}
         for index, item in enumerate(schedule):
-            count = 9 if index == 0 else 12
+            count = group - (3 if index == 0 else 0)
             clip = list(islice(inputs, count))
             if len(clip) != count:
                 raise ValueError(f"Expected {count} condition frames at chunk {index}")
@@ -95,6 +99,4 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--frames", type=int, default=477)
     args = parser.parse_args()
-    if args.frames < 9 or (args.frames - 9) % 12:
-        parser.error("--frames must be 9 + a multiple of 12")
     run(args)

@@ -16,7 +16,7 @@ def finite(value):
 
 
 class PhotoRenderer:
-    def __init__(self, blender, worker, scene, style, gpu, compute):
+    def __init__(self, blender, worker, scene, style, gpu, compute, generative=None):
         self.command = (
             str(blender), "--background", "--factory-startup", "--threads", "4", "--python-exit-code", "1",
             "--python", str(worker), "--", str(scene), str(style), compute,
@@ -24,14 +24,18 @@ class PhotoRenderer:
         self.env = {**os.environ, "CUDA_VISIBLE_DEVICES": gpu}
         self.scene = json.loads(scene.read_text())
         self.style = json.loads(style.read_text())
+        self.generative = generative
         self.process = None
         self.lock = asyncio.Lock()
         self.recent_log = deque(maxlen=10)
 
     async def config(self, _):
+        methods = [{"id": "cycles", "label": "Blender Cycles", "timeout": 120, "available": True}]
+        if self.generative:
+            methods.extend(self.generative.profiles())
         return web.json_response({
             "scene": self.scene["scene"], "width": self.style["width"], "height": self.style["height"],
-            "weather": "day", "backend": "cycles",
+            "weather": "day", "backend": "cycles", "methods": methods,
         })
 
     def valid(self, state):
@@ -85,31 +89,51 @@ class PhotoRenderer:
     async def frame(self, req):
         try:
             state = await req.json()
-            key = state["key"]
-            if str(uuid.UUID(key)) != key or not self.valid(state):
+            key, method = state["key"], state.get("method", "cycles")
+            methods = self.generative.style["methods"] if self.generative else {}
+            stream = state.get("stream", key)
+            if (str(uuid.UUID(key)) != key or str(uuid.UUID(stream)) != stream
+                    or (method != "cycles" and method not in methods) or not self.valid(state)):
                 raise ValueError
         except (ValueError, KeyError, TypeError, AttributeError):
             raise web.HTTPBadRequest(reason="invalid or unsupported CityNav render state")
+        enhanced = method != "cycles"
+        if enhanced and not self.generative.available(method):
+            raise web.HTTPServiceUnavailable(reason="local renderer weights or runtime are missing")
         async with self.lock:
-            try:
-                async with asyncio.timeout(120):
-                    await self.start()
-                    with tempfile.TemporaryDirectory(prefix="citynav-photo-") as directory:
-                        target = Path(directory) / "frame.png"
-                        job = {"state": state, "output": str(target), "id": key}
+            with tempfile.TemporaryDirectory(prefix="citynav-photo-") as directory:
+                target = Path(directory) / "frame.png"
+                try:
+                    async with asyncio.timeout(120):
+                        await self.start()
+                        job = {"state": state, "output": str(target), "id": key, "controls": enhanced}
                         self.process.stdin.write((json.dumps(job, allow_nan=False) + "\n").encode())
                         await self.process.stdin.drain()
                         result = await self.read_reply()
                         if result.get("id") != key or "error" in result:
                             raise RuntimeError(result.get("error", "unexpected Blender response"))
                         data = target.read_bytes()
-            except (OSError, RuntimeError, TimeoutError, asyncio.CancelledError) as error:
-                await self.stop()
-                if isinstance(error, asyncio.CancelledError):
-                    raise
-                req.app.logger.error("Cycles renderer failed: %s", error)
-                raise web.HTTPServiceUnavailable(reason="scene renderer failed")
+                except (OSError, RuntimeError, TimeoutError, asyncio.CancelledError) as error:
+                    await self.stop()
+                    if isinstance(error, asyncio.CancelledError):
+                        raise
+                    req.app.logger.error("Cycles renderer failed: %s", error)
+                    raise web.HTTPServiceUnavailable(reason="scene renderer failed")
+                if enhanced:
+                    try:
+                        controls = next(Path(directory).glob("controls-*.exr"), None)
+                        if controls is None:
+                            raise RuntimeError("Cycles did not produce control passes")
+                        data, ms = await self.generative.render(method, state, target, controls,
+                                                                 Path(directory) / "generated.png")
+                        result["ms"] += ms
+                    except (OSError, RuntimeError, TimeoutError, asyncio.CancelledError) as error:
+                        await self.generative.stop()
+                        if isinstance(error, asyncio.CancelledError):
+                            raise
+                        req.app.logger.error("%s renderer failed: %s", method, error)
+                        raise web.HTTPServiceUnavailable(reason=f"{method} renderer failed")
         return web.Response(body=data, content_type="image/png", headers={
             "X-CityNav-Frame": key, "X-CityNav-Tick": str(state["tick"]),
-            "X-CityNav-Render-Ms": f'{result["ms"]:.1f}',
+            "X-CityNav-Method": method, "X-CityNav-Render-Ms": f'{result["ms"]:.1f}',
         })

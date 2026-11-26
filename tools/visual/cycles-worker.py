@@ -199,8 +199,11 @@ class CityRender:
         self.camera.data.clip_start = .055
         scene.camera = self.camera
         mats = [material(n, style["textures"].get(str(n)), directory) for n in range(16)]
+        mats[7].pass_index = 1  # Road paint, including crossings
         root = manifest.parent
         add_object("CityNav static scene", mesh_from(root / self.bundle["world"], mats))
+        if self.bundle.get("signs"):
+            add_object("CityNav signs", mesh_from(root / self.bundle["signs"], mats)).pass_index = 3
         self.meshes = {key: mesh_from(root / file, mats) for key, file in self.bundle["actors"].items()}
         models = style.get("models", {})
         replacements = {kind: load_actor_asset(directory / asset["file"], asset["yawDegrees"])
@@ -222,13 +225,40 @@ class CityRender:
                     bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=8, radius=1,
                                                        location=axis((post["x"]+dx,height,post["z"]+dz)))
                     lamp = bpy.context.object
+                    lamp.pass_index = 2
                     lamp.scale = (.083, .041, .072)
                     lamp.rotation_euler.z = angle
                     lamp.data.materials.append(off)
                     self.lenses.append((post["crossing"], walk, lamp, green if walk else red))
         self.off = off
+        self.control_output = None
 
-    def render(self, state, output):
+    def controls(self, directory):
+        scene = self.scene
+        layer = scene.view_layers[0]
+        layer.use_pass_z = layer.use_pass_object_index = layer.use_pass_material_index = True
+        scene.use_nodes = True
+        if self.control_output is not None:
+            self.control_output.base_path = str(directory)
+            return
+        tree = scene.node_tree
+        tree.nodes.clear()
+        source = tree.nodes.new("CompositorNodeRLayers")
+        composite = tree.nodes.new("CompositorNodeComposite")
+        output = tree.nodes.new("CompositorNodeOutputFile")
+        self.control_output = output
+        output.base_path = str(directory)
+        output.format.file_format = "OPEN_EXR"
+        output.format.color_depth = "32"
+        output.format.color_mode = "RGB"
+        output.file_slots[0].path = "controls-"
+        channels = tree.nodes.new("CompositorNodeCombRGBA")
+        for name, index in (("Depth", 0), ("IndexOB", 1), ("IndexMA", 2)):
+            tree.links.new(source.outputs[name], channels.inputs[index])
+        tree.links.new(channels.outputs[0], output.inputs[0])
+        tree.links.new(source.outputs["Image"], composite.inputs["Image"])
+
+    def render(self, state, output, controls=False):
         camera = state["camera"]
         self.camera.location = axis(camera["eye"])
         direction = Vector(axis(camera["target"])) - Vector(self.camera.location)
@@ -242,6 +272,8 @@ class CityRender:
             if row["id"] not in self.actors:
                 body = add_object(row["id"], self.meshes[row["mesh"]])
                 legs = [add_object(row["id"] + f"/leg{side}", self.legs[2]) for side in (-1, 1)] if "stride" in row else []
+                for obj in (body, *legs):
+                    obj.pass_index = 1
                 self.actors[row["id"]] = [body, *legs]
             body, *legs = self.actors[row["id"]]
             body.data = self.meshes[row["mesh"]]
@@ -256,6 +288,11 @@ class CityRender:
                 leg.hide_render = False
         for crossing, walk, obj, light in self.lenses:
             obj.data.materials[0] = light if state["signals"][crossing] == walk else self.off
+        layer = self.scene.view_layers[0]
+        layer.use_pass_z = layer.use_pass_object_index = layer.use_pass_material_index = False
+        self.scene.use_nodes = False
+        if controls:
+            self.controls(Path(output).parent)
         self.scene.render.filepath = output
         bpy.ops.render.render(write_still=True)
 
@@ -272,7 +309,7 @@ if __name__ == "__main__":
         job = json.loads(line)
         started = time.perf_counter()
         try:
-            renderer.render(job["state"], job["output"])
+            renderer.render(job["state"], job["output"], job.get("controls", False))
             reply({"id": job["id"], "ms": (time.perf_counter() - started) * 1000})
         except Exception as error:
             reply({"id": job["id"], "error": str(error)})

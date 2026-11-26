@@ -193,11 +193,11 @@ async def live(page, timeout=35000):
 
 
 async def setup_episode(page, episode, robot="go2"):
-    await page.locator("#benchmark-library").click()
+    await page.locator("#configure").click()
     await page.locator("#scene-select").select_option("extreme" if "-x" in episode else episode.rsplit("-",1)[0])
     await page.locator("#task-select").select_option(episode)
     await page.locator("#robot-select").select_option(robot)
-    await page.locator("#setup button[type=submit]").click()
+    await page.locator("#apply-and-start").click()
     await page.wait_for_function("!document.querySelector('#setup').open")
 
 

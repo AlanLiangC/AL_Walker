@@ -1,6 +1,7 @@
 import { Mesh } from './geometry.mjs';
 import { material as m } from './materials.mjs';
 import { randomSource } from './math.mjs';
+import { layoutClass as label } from './render-layout.mjs';
 
 const paint=(mesh,area,y,color,finish)=>mesh.flat(area.x1,area.z1,area.x2,area.z2,y,color,finish);
 
@@ -109,13 +110,15 @@ function crossingPaint(mesh,c,road,groundedMarkings) {
   }
 }
 
-function signage(mesh,layout) {
+function signage(mesh,layout,semantic) {
   const posts=layout.posts;
   for (const post of posts) {
     const {x,z,crossing}=post;
     const type=layout.crossings.find(c=>c.id===crossing).mode;
+    mesh.semantic=semantic?label.pole:0;
     mesh.cylinder(x,z,0,2.65,.08,.065,'#5d6262',9,m.metal);
     const colors={signal:'#334740',guard:'#b09853',stop:'#b93f31',yield:'#e0bb74'};
+    mesh.semantic=semantic?(type==='stop'||type==='yield'?label.sign:label.signal):0;
     if (type==='stop') {
       mesh.tube([x,2.23,z-.045],[x,2.23,z+.045],.26,.26,colors[type],8,m.emitter);
       mesh.block(x-.12,2.205,z-.052,x+.12,2.254,z+.052,'#f4e9ce',m.emitter);
@@ -123,12 +126,15 @@ function signage(mesh,layout) {
   }
 }
 
-export function urbanMesh(layout,{ groundedMarkings=false }={}) {
+export function urbanMesh(layout,{ groundedMarkings=false,signMesh,semantic=false }={}) {
   const mesh=new Mesh();
+  const mark=value=>{ mesh.semantic=semantic?value:0; };
   const rng=randomSource(layout.seed^0x89ee3);
   const {bounds,nodes,edges,roads}=layout;
+  mark(label.terrain);
   mesh.flat(bounds.x1-115,bounds.z1-105,bounds.x2+115,bounds.z2+105,-.077,'#7e8865',m.grass);
   paint(mesh,bounds,-.045,layout.family.density>5?'#96998d':'#778d64',layout.family.density>5?m.concrete:m.grass);
+  mark(label.sidewalk);
   const pathColor=layout.family.surface==='brick'?'#c3a487':'#c7c4b0';
   for (const {x,z} of nodes) mesh.flat(x-2.5,z-2.5,x+2.5,z+2.5,-.005,pathColor,m[layout.family.surface]);
   for (const edge of edges) {
@@ -136,14 +142,23 @@ export function urbanMesh(layout,{ groundedMarkings=false }={}) {
     mesh.flat(a.x-1.85,a.z-1.85,b.x+1.85,b.z+1.85,-.008,pathColor,m[layout.family.surface]);
   }
   for (const zone of layout.zones) paint(mesh,zone,-.002,'#ab9980',m.paving);
+  mark(label.road);
   for (const road of roads) street(mesh,road,roads,groundedMarkings);
   for (const c of layout.crossings) crossingPaint(mesh,c,roads.find(r=>r.id===c.road),groundedMarkings);
+  mark(label.terrain);
   for (const water of layout.water) paint(mesh,water,-.013,'#4b7483',m.water);
+  mark(label.sidewalk);
   for (const area of layout.restricted) paint(mesh,area,-.004,'#b9856a',m.concrete);
+  mark(label.building);
   for (const item of layout.buildings) facade(mesh,item,rng);
+  mark(label.vegetation);
   for (const item of layout.trees) tree(mesh,item,rng);
-  for (const item of [...layout.props,...layout.barriers]) prop(mesh,item);
-  signage(mesh,layout);
+  for (const item of [...layout.props,...layout.barriers]) {
+    mark(item.kind==='barrier'?label.fence:item.kind==='stall'||item.kind==='shelter'?label.building:label.wall);
+    prop(mesh,item);
+  }
+  signage(signMesh??mesh,layout,semantic);
+  mark(label.pole);
   for (const [x,z] of layout.lamps) {
     mesh.cylinder(x,z,0,4.55,.065,.045,'#536265',10,m.metal);
     mesh.block(x-.10,4.51,z-.64,x+.10,4.65,z+.12,'#bcb8a9',m.streetlamp);

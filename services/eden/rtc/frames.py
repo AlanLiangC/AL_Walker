@@ -33,15 +33,16 @@ def read_input(frame, width, height):
 
 
 def pack(draft, main, output_id):
-    height, width, _ = draft.shape
-    image = np.empty((height + MARGIN, width * 2, 3), np.uint8)
-    image[:height, :width] = draft
-    image[:height, width:] = main
+    height, width, _ = main.shape
+    image = np.empty((height + MARGIN, width if draft is None else width * 2, 3), np.uint8)
+    if draft is not None:
+        image[:height, :width] = draft
+    image[:height, -width:] = main
     image[height:] = 16
     tag = bytes((MAGIC,)) + output_id.to_bytes(3, "big")
     bits = np.unpackbits(np.frombuffer(tag + bytes((checksum(tag),)), np.uint8))
     span = 40 * CELL
-    for offset in range(0, width*2-span+1, span):
+    for offset in range(0, image.shape[1]-span+1, span):
         polarity = (offset // span) % 2
         image[height:, offset:offset+span] = np.repeat(
             np.where(bits ^ polarity, 235, 16), CELL

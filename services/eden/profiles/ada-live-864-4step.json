@@ -1,0 +1,1 @@
+{"backend":"edenlive","tier":"evaluation","precision":"fp8","fp8":true,"sage":true,"asyncFinalize":true,"latentChunk":2,"historyLatents":8,"livePlaybackMs":410,"bitrate":4500000,"direct":true,"attention":"sageattention2","decoder":"LightTAE","width":864,"height":480,"fps":24,"warmMs":15000,"stallMs":3000,"maxAgeMs":1800,"cudaGraph":false,"compile":false}

@@ -10,7 +10,13 @@
 <body data-source>
   <header class="bar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><strong>CityNav</strong><span class="brand-divider"></span><span class="brand-description">城市导航仿真</span></div>
-    <div class="bar-actions"><button type="button" id="benchmark-library" class="button quiet">场景库</button><a id="scene-switch" class="button quiet" href="./" hidden>模拟城市</a><span id="run-state" class="state"><i></i><span>待出发</span></span><button type="button" id="configure" class="button quiet">任务配置</button><button type="button" id="run" class="button primary">开始任务</button></div>
+    <div class="bar-actions">
+      <a id="scene-switch" class="button quiet" href="./" hidden>模拟城市</a>
+      <button type="button" id="configure" class="button quiet" aria-haspopup="dialog">场景与任务</button>
+      <span id="run-state" class="state" role="status"><i aria-hidden="true"></i><span>待出发</span></span>
+      <button type="button" id="return-to-start" class="button quiet" title="暂停并返回当前任务起点" disabled>回到起点</button>
+      <button type="button" id="run" class="button primary">开始任务</button>
+    </div>
   </header>
   <main>
     <section class="heading">
@@ -39,10 +45,14 @@
             <div class="view-tabs" role="group" aria-label="场景视角">
               <button type="button" data-view="chase" aria-pressed="true">追踪</button><button type="button" data-view="robot" aria-pressed="false">机器人</button><button type="button" data-view="overhead" aria-pressed="false">俯视</button>
               <button type="button" id="fullscreen" aria-pressed="false">全屏</button>
-              <button type="button" id="reset-view" title="复位视角（V）">复位</button>
+              <button type="button" id="reset-view" title="复位视角（V）">复位视角</button>
             </div>
           </div>
-          <div class="immersive-controls"><span id="immersive-stats"></span><button type="button" id="fullscreen-run">开始任务</button></div>
+          <div class="immersive-controls">
+            <span id="immersive-stats"></span>
+            <button type="button" id="fullscreen-return-to-start" class="button quiet" title="暂停并返回当前任务起点" disabled>回到起点</button>
+            <button type="button" id="fullscreen-run" class="button primary">开始任务</button>
+          </div>
           <div class="compact-signal" id="compact-signal" hidden></div>
           <div class="notice" id="notice" hidden></div>
           <div class="viewport-bottom">
@@ -60,6 +70,13 @@
             <button type="button" data-eden="compare" aria-pressed="false" hidden>对照</button>
             <button type="button" data-eden="parallel" aria-pressed="false" hidden>实时并排</button>
             <button type="button" data-eden="photo" aria-pressed="false" hidden>写实闭环</button>
+          </div>
+          <select id="photo-method" aria-label="写实闭环渲染方法" hidden></select>
+          <div id="reference-controls" hidden>
+            <label for="reference-style">场景风格</label>
+            <select id="reference-style"><option value="">自定义</option></select>
+            <textarea id="reference-prompt" aria-label="场景风格提示词" rows="2" maxlength="2500" placeholder="输入自己的风格，或选择预设后编辑"></textarea>
+            <button type="button" id="reference-start" class="button quiet">生成参考帧</button>
           </div>
           <output id="eden-status" aria-live="off">原画</output>
         </div>
@@ -93,12 +110,12 @@
       </aside>
     </div>
   </main>
-  <dialog id="setup">
+  <dialog id="setup" aria-labelledby="setup-title">
     <form id="setup-form">
-      <div class="dialog-head"><div><div class="eyebrow">出发前</div><h2>任务配置</h2></div><button type="button" data-close="setup" class="button quiet">关闭</button></div>
+      <div class="dialog-head"><h2 id="setup-title">场景与任务</h2><button type="button" data-close="setup" class="button quiet">关闭</button></div>
       <div class="setup-overview">
-        <div id="benchmark-picker" class="setup-domain" hidden><label for="scene-select">场景库</label><select id="scene-select"></select><p id="benchmark-count"></p></div>
-        <div class="setup-route"><label for="task-select">路线 / Episode</label><select id="task-select"></select><p id="task-detail"></p><small id="task-conditions"></small></div>
+        <div id="benchmark-picker" class="setup-domain" hidden><label for="scene-select">场景</label><select id="scene-select"></select><p id="benchmark-count"></p></div>
+        <div class="setup-route"><label for="task-select">任务路线</label><select id="task-select"></select><p id="task-detail"></p><small id="task-conditions"></small></div>
         <div><label for="robot-select">机器人</label><select id="robot-select"></select><p id="robot-detail"></p><label for="seed">场景随机种子</label><input id="seed" type="number" min="0" max="4294967295" step="1" required></div>
         <div class="setup-domain"><label for="domain-select">仿真环境</label><select id="domain-select"></select><p id="domain-detail"></p></div>
       </div>
@@ -106,7 +123,11 @@
       <div class="setup-sensor-title"><h3>传感器安装</h3><button id="add-sensor" class="button quiet" type="button">添加传感器</button></div>
       <p class="mount-help">安装位置以机身地面坐标为参考。采样率与延迟留空时使用当前环境预设。</p>
       <div id="sensor-settings"></div>
-      <div class="dialog-actions"><span id="config-error" role="alert"></span><button type="submit" class="button primary">应用并开始</button></div>
+      <div class="dialog-actions setup-actions">
+        <span id="config-error" role="alert"></span>
+        <button type="submit" id="load-setup" class="button primary">加载到起点</button>
+        <button type="submit" id="apply-and-start" class="button quiet" value="start">加载并开始</button>
+      </div>
     </form>
   </dialog>
   <dialog id="result">

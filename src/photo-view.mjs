@@ -17,10 +17,12 @@ export async function renderPhoto(config,state,signal) {
     method:'POST',headers,body:JSON.stringify({...state,key}),signal,cache:'no-store',
   });
   if (!res.ok) throw Error('HTTP '+res.status);
-  if (res.headers.get('X-CityNav-Frame')!==key||res.headers.get('X-CityNav-Tick')!==String(state.tick)) {
+  const method=res.headers.get('X-CityNav-Method');
+  if (res.headers.get('X-CityNav-Frame')!==key||res.headers.get('X-CityNav-Tick')!==String(state.tick)||
+      method!==state.method) {
     throw Error('渲染帧与仿真状态不匹配');
   }
-  return { key,tick:state.tick,renderMs:Number(res.headers.get('X-CityNav-Render-Ms')),image:await res.blob() };
+  return { key,tick:state.tick,method,renderMs:Number(res.headers.get('X-CityNav-Render-Ms')),image:await res.blob() };
 }
 
 export class PhotoView {

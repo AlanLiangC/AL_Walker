@@ -4,6 +4,7 @@ import { Mesh, actorMesh, cityMesh, markers, pedestrianLeg, robotMesh } from './
 import { forward, radians } from './math.mjs';
 import { geometryFragment, geometryVertex, rainFragment, skyFragment, skyVertex, sun } from './lighting.mjs';
 import { material, uploadTexture } from './materials.mjs';
+import { actorClass, layoutClass } from './render-layout.mjs';
 import { rayDirection, robots, sensorPose } from './sensors.mjs';
 import { urbanMesh } from './urban-geometry.mjs';
 import { chaseOrbit, lookAround, overheadOrbit } from './view-controls.mjs';
@@ -78,6 +79,16 @@ function cameraView(pose,fov,far) {
   return { eye,target:eye.map((value,index) => value+direction[index]),fov,far };
 }
 
+function* crossingLamps(engine,world) {
+  for (const {x,z,crossing:id} of (world?.layout?.posts??lightPoles)) {
+    const crossing=(world?.crossings??crossings).find(item=>item.id===id);
+    if (!crossing||crossing.mode==='stop'||crossing.mode==='yield') continue;
+    const walk=(world?.crossingSignal??crossingSignal)(engine.time,crossing).state==='walk';
+    const y=(world?.surfaceAt??surfaceAt)(x,z);
+    yield {x,z,walk,high:y+(world?.layout?2.40:2.83),low:y+(world?.layout?2.12:2.44)};
+  }
+}
+
 function routeMesh(task,ground=surfaceAt) {
   const mesh=new Mesh();
   for (let index=1; index<task.points.length; index++) {
@@ -103,13 +114,14 @@ export class CityRenderer {
     if (!this.gl) throw new Error('当前浏览器未启用 WebGL');
     const gl=this.gl;
     const hasGradient=!!(gl.getExtension('OES_standard_derivatives')&&gl.getExtension('EXT_shader_texture_lod'));
-    this.program=programFor(gl,geometryVertex,geometryFragment(hasGradient));
+    this.photoSupported=gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS)>=9;
+    this.program=programFor(gl,geometryVertex,geometryFragment(hasGradient,this.photoSupported));
     this.locations=uniforms(gl,this.program,
-      'Projection View Position Scale Yaw Tint Pass Sun Haze Eye Weather Overcast Snow Night Time SunVP ShadowTexel Albedo Relief Leaves Sky Sign Shadow Reflect Reflection ReflectionVP Headlamp Ahead Lanterns[0]');
+      'Projection View Position Scale Yaw Tint Pass Semantic Sun Haze Eye Weather Overcast Snow Night Time SunVP ShadowTexel Albedo Relief Leaves Sky Sign Shadow Reflect Reflection ReflectionVP Headlamp Ahead Lanterns[0] Photo PhotoColor PhotoDepth PhotoVP');
     this.attributes=Object.fromEntries(['Point','Color','Normal','Material','UV']
       .map(name => [name,gl.getAttribLocation(this.program,'a'+name)]));
     this.skyProgram=programFor(gl,skyVertex,skyFragment);
-    this.skyLocations=uniforms(gl,this.skyProgram,'CameraX CameraY CameraZ Sky Sun Haze Overcast Night');
+    this.skyLocations=uniforms(gl,this.skyProgram,'CameraX CameraY CameraZ Sky Sun Haze Overcast Night Photo PhotoColor PhotoDepth PhotoVP');
     this.skyPoint=gl.getAttribLocation(this.skyProgram,'aPoint');
     this.skyBuffer=gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER,this.skyBuffer);
@@ -124,6 +136,7 @@ export class CityRenderer {
     this.robotMeshes=Object.fromEntries(Object.entries(robots).map(([key,robot]) =>
       [key,Array.from({length:9},(_,index) => this.upload(robotMesh(robot,key==='g1',(index-4)/4)))]));
     this.actorMeshes=new Map();
+    this.detailedActors=new Map();
     this.legs=[-1,-.5,0,.5,1].map(swing => this.upload(pedestrianLeg(swing)));
     this.markers=Object.fromEntries(Object.entries(markers()).map(([key,mesh]) => [key,this.upload(mesh)]));
     this.routes=Object.fromEntries(tasks.map(task => [task.id,this.upload(routeMesh(task))]));
@@ -154,7 +167,7 @@ export class CityRenderer {
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,depth);
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE) throw Error('传感器帧缓冲区不可用');
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    return { frame,width,height,texture };
+    return { frame,width,height,texture,depth };
   }
 
   selectWorld(world) {
@@ -162,7 +175,7 @@ export class CityRenderer {
     if (layout===this.layout) return;
     if (this.urbanCity) this.gl.deleteBuffer(this.urbanCity.buffer);
     this.layout=layout;
-    this.urbanCity=layout ? this.upload(urbanMesh(layout)) : null;
+    this.urbanCity=layout ? this.upload(urbanMesh(layout,{semantic:true})) : null;
     this.urbanLanterns=layout ? new Float32Array(Array.from({length:streetLamps.length},(_,i)=>
       layout.lamps[i] ? [layout.lamps[i][0],4.51,layout.lamps[i][1]-.25] : [0,-1000,0]).flat()) : null;
   }
@@ -181,8 +194,28 @@ export class CityRenderer {
     const gl=this.gl;
     const buffer=gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
-    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh.data),gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER,mesh.data instanceof Float32Array?mesh.data:new Float32Array(mesh.data),gl.STATIC_DRAW);
     return { buffer,count:mesh.data.length/12 };
+  }
+
+  async loadDetailedActors(endpoint) {
+    if (!globalThis.DecompressionStream) return;
+    const sources=[['car','vehicles/car.f32.gz',1],['van','vehicles/van.f32.gz',1],
+      ['pedestrian','casual-walker.f32.gz',9]];
+    return this.actorLoad??=Promise.all(sources.map(async ([kind,asset,poses])=>{
+      const path=new URL('/assets/visual/'+asset,new URL(endpoint,location.href));
+      try {
+        const response=await fetch(path,{signal:AbortSignal.timeout(3000)});
+        if (!response.ok||!response.body) return;
+        const data=await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        if (data.byteLength===0||data.byteLength%(144*poses)!==0) return;
+        const bytes=data.byteLength/poses;
+        this.detailedActors.set(kind,Array.from({length:poses},(_,index)=>
+          this.upload({data:new Float32Array(data,index*bytes,bytes/4)})));
+      } catch {
+        // The built-in meshes are available without the optional assets.
+      }
+    }));
   }
 
   draw(mesh,x=0,y=0,z=0,yaw=0,tint=[1,1,1],scale=[1,1,1]) {
@@ -217,6 +250,8 @@ export class CityRenderer {
     gl.useProgram(this.program);
     for (const attribute of Object.values(this.attributes)) gl.enableVertexAttribArray(attribute);
     gl.uniform1i(u.Pass,pass);
+    gl.uniform1f(u.Semantic,-1);
+    gl.uniform1i(u.Photo,0);
     gl.uniformMatrix4fv(u.View,false,view);
     gl.uniformMatrix4fv(u.Projection,false,projection);
   }
@@ -233,7 +268,7 @@ export class CityRenderer {
     if (locations.Snow) gl.uniform1f(locations.Snow,Number(!!domain.weather?.snow));
   }
 
-  drawSky(camera,domain,aspect) {
+  drawSky(camera,domain,aspect,projected) {
     const gl=this.gl,u=this.skyLocations;
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(this.skyProgram);
@@ -250,6 +285,7 @@ export class CityRenderer {
     gl.uniform3fv(u.CameraY,up.map(v => v*width/aspect));
     gl.uniform3fv(u.CameraZ,back.map(v => -v));
     this.weather(u,domain);
+    this.bindProjection(u,projected);
     gl.drawArrays(gl.TRIANGLES,0,3);
     gl.enable(gl.DEPTH_TEST);
   }
@@ -298,29 +334,33 @@ export class CityRenderer {
 
   drawScene(engine,camera,{
     frame=null,width,height,depth=false,showRobot=false,showRoute=false,domain=engine.domain,robotId=engine.robotId,
-    aspect=width/height,reflecting=false,world=engine.world,
+    aspect=width/height,reflecting=false,world=engine.world,staticOnly=false,projected=false,detailed=false,semantic=false,
   }) {
     const gl=this.gl,u=this.locations;
-    if (!depth) this.drawShadowMap(engine,robotId);
-    const reflect=!depth&&!reflecting&&domain.wet>.2;
+    const color=!depth&&!semantic;
+    if (color) this.drawShadowMap(engine,robotId);
+    const reflect=color&&!reflecting&&domain.wet>.2;
     if (reflect) {
       const mirror=([x,y,z]) => [x,-y,z];
       const reflected={ ...camera,eye:mirror(camera.eye),target:mirror(camera.target) };
       this.reflectionVP=multiply(perspective(camera.fov,aspect,camera.far),viewAt(reflected.eye,reflected.target));
       const {frame,width,height}=this.reflection;
-      this.drawScene(engine,reflected,{ frame,width,height,aspect,domain,robotId,world,reflecting:true,showRobot });
+      this.drawScene(engine,reflected,{frame,width,height,aspect,domain,robotId,world,reflecting:true,
+        showRobot,staticOnly,projected,detailed});
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER,frame);
     gl.viewport(0,0,width,height);
-    gl.clearColor(0,0,0,1);
+    const background=semantic?layoutClass.sky/255:0;
+    gl.clearColor(background,background,background,1);
     gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
-    if (!depth) this.drawSky(camera,domain,aspect);
-    this.setupGeometry(viewAt(camera.eye,camera.target),perspective(camera.fov,aspect,camera.far),depth ? 1 : reflecting ? 3 : 0);
+    if (color) this.drawSky(camera,domain,aspect,projected);
+    this.setupGeometry(viewAt(camera.eye,camera.target),perspective(camera.fov,aspect,camera.far),
+      semantic?4:depth?1:reflecting?3:0);
     this.bindMaterials(this.shadow.texture,reflect ? this.reflection.texture : undefined);
     gl.uniform1i(u.Reflect,Number(reflect));
     if (reflect) gl.uniformMatrix4fv(u.ReflectionVP,false,this.reflectionVP);
     this.weather(u,domain);
-    if (domain.night&&!depth) {
+    if (domain.night&&color) {
       const p=engine.player;
       const [x,z]=forward(p.yaw);
       gl.uniform3fv(u['Lanterns[0]'],this.urbanLanterns??this.lanterns);
@@ -331,36 +371,50 @@ export class CityRenderer {
     gl.uniformMatrix4fv(u.SunVP,false,this.sunVP ?? new Float32Array(16));
     gl.uniform1f(u.ShadowTexel,1/this.shadow.width);
     gl.uniform1f(u.Time,engine.time);
+    this.bindProjection(u,projected&&color&&!reflecting);
     this.draw(this.urbanCity??this.city);
-    for (const {x,z,crossing:id} of (world?.layout?.posts??lightPoles)) {
-      const crossing=(world?.crossings??crossings).find(item => item.id===id);
-      if (crossing.mode==='stop'||crossing.mode==='yield') continue;
-      const walk=(world?.crossingSignal??crossingSignal)(engine.time,crossing).state==='walk';
-      const y=(world?.surfaceAt??surfaceAt)(x,z);
-      const high=world?.layout?2.40:2.83, low=world?.layout?2.12:2.44;
-      this.draw(this.markers.light,x,y+high,z,0,walk?[.23,.29,.26]:[1,.25,.16]);
-      this.draw(this.markers.light,x,y+low,z,0,walk?[.30,1,.59]:[.23,.29,.26]);
+    gl.uniform1i(u.Photo,0);
+    if (semantic) gl.uniform1f(u.Semantic,layoutClass.signal);
+    for (const {x,z,walk,high,low} of crossingLamps(engine,world)) {
+      this.draw(this.markers.light,x,high,z,0,walk?[.23,.29,.26]:[1,.25,.16]);
+      this.draw(this.markers.light,x,low,z,0,walk?[.30,1,.59]:[.23,.29,.26]);
       // The lens rings sit outside the wider signal housing on all four sides.
       for (const [dx,dz] of [[-.204,0],[.204,0],[0,-.204],[0,.204]]) {
-        this.draw(this.markers.light,x+dx,y+(walk?low:high),z+dz,0,
+        this.draw(this.markers.light,x+dx,walk?low:high,z+dz,0,
           walk?[.30,1,.59]:[1,.25,.16],[.56,1,.56]);
       }
     }
-    this.drawActors(engine);
+    if (!staticOnly) this.drawActors(engine,projected||detailed,semantic);
     if (showRoute) {
       const [gx,gz]=engine.task.points.at(-1);
       this.draw(this.pathBuffer(engine.task,world));
       this.draw(this.markers.goal,gx,world.surfaceAt(gx,gz),gz);
     }
-    if (showRobot) this.drawRobot(engine.player,robotId,engine.time);
+    if (showRobot) {
+      if (semantic) gl.uniform1f(u.Semantic,0);  // Cityscapes has no robot class.
+      this.drawRobot(engine.player,robotId,engine.time);
+    }
     const rain=domain.weather?.rain??(domain.night?1:0);
-    if (rain&&!depth&&!reflecting) this.drawRain(aspect,engine.time,rain,!!domain.weather?.snow);
+    if (rain&&color&&!reflecting) this.drawRain(aspect,engine.time,rain,!!domain.weather?.snow);
   }
 
-  drawActors(state) {
+  drawActors(state,detail=false,semantic=false) {
     for (const actor of state.actors) {
-      const key=actor.kind+actor.color;
-      if (!this.actorMeshes.has(key)) this.actorMeshes.set(key,this.upload(actorMesh(actor)));
+      if (semantic) this.gl.uniform1f(this.locations.Semantic,actorClass[actor.kind]??0);
+      const imported=detail&&this.detailedActors.get(actor.kind);
+      if (imported) {
+        if (actor.kind==='pedestrian') {
+          const stride=1.25;
+          const phase=actor.speed>0&&actor.progress>0?1+Math.floor(actor.progress/stride*8)%8:0;
+          this.draw(imported[phase],actor.x,actor.y,actor.z,actor.yaw);
+          continue;
+        }
+        const rgb=Number.parseInt(actor.color.slice(1),16);
+        this.draw(imported[0],actor.x,actor.y,actor.z,actor.yaw,[rgb>>16,(rgb>>8)&255,rgb&255].map(value=>value/255));
+        continue;
+      }
+      const key=actor.kind+actor.color+Number(detail);
+      if (!this.actorMeshes.has(key)) this.actorMeshes.set(key,this.upload(actorMesh(actor,{detail})));
       this.draw(this.actorMeshes.get(key),actor.x,actor.y,actor.z,actor.yaw);
       if (actor.kind==='pedestrian') {
         const pose=actor.speed ? Math.round(Math.sin(state.time*9+actor.progress)*2) : 0;
@@ -391,13 +445,98 @@ export class CityRenderer {
     return { ...chaseOrbit(p,view),fov:85,far:196 };
   }
 
-  renderDisplay(engine,camera,{ width,height,showRobot,showRoute }) {
+  visibleSignalRegions(engine,camera,aspect) {
+    const {back,right,up}=basisAt(camera.eye,camera.target);
+    const aperture=Math.tan(radians(camera.fov)/2);
+    const regions=[];
+    for (const {x,z,walk,high,low} of crossingLamps(engine,engine.world)) {
+      const at=[x,(high+low+.21)/2,z].map((value,i)=>value-camera.eye[i]);
+      const depth=-dot(back,at);
+      if (depth<.65||depth>65) continue;
+      const scale=.5/(depth*aperture);
+      const px=.5+dot(right,at)*scale,py=.5-dot(up,at)*scale*aspect;
+      const halfWidth=.39*scale,halfHeight=.43*scale*aspect;
+      if (px+halfWidth<0||px-halfWidth>1||py+halfHeight<0||py-halfHeight>1) continue;
+      regions.push([px-halfWidth,py-halfHeight,px+halfWidth,py+halfHeight,walk]);
+    }
+    return regions.slice(0,20);
+  }
+
+  renderDisplay(engine,camera,{width,height,showRobot,showRoute,staticOnly=false,projected=false,detailed=false}) {
     this.selectWorld(engine.world);
     if (this.canvas.width!==width || this.canvas.height!==height) {
       this.canvas.width=width;
       this.canvas.height=height;
     }
-    this.drawScene(engine,camera,{ width,height,showRobot,showRoute });
+    const domain=projected&&this.photo?.look?{...engine.domain,...this.photo.look}:engine.domain;
+    this.drawScene(engine,camera,{width,height,showRobot,showRoute,staticOnly,projected,detailed,domain});
+  }
+
+  photoGeometry(engine,camera,aspect,{staticOnly=true,detailed=false,showRobot=false}={}) {
+    this.selectWorld(engine.world);
+    const {gl,target:{frame,width,height}}=this;
+    this.drawScene(engine,camera,{frame,width,height,aspect,depth:true,staticOnly,detailed,showRobot});
+    const pixels=new Uint8Array(width*height*4);
+    gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    return {pixels,width,height,matrix:multiply(perspective(camera.fov,aspect,camera.far),viewAt(camera.eye,camera.target))};
+  }
+
+  semanticGeometry(engine,camera,{width,height,detailed,showRobot}) {
+    this.selectWorld(engine.world);
+    const gl=this.gl,previous=this.semanticTarget;
+    if (!previous||previous.width!==width||previous.height!==height) {
+      if (previous) {
+        gl.deleteTexture(previous.texture);
+        gl.deleteFramebuffer(previous.frame);
+        gl.deleteRenderbuffer(previous.depth);
+      }
+      this.semanticTarget=this.createTarget(width,height);
+    }
+    this.drawScene(engine,camera,{frame:this.semanticTarget.frame,width,height,semantic:true,detailed,showRobot});
+    const pixels=new Uint8Array(width*height*4);
+    gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    return pixels;
+  }
+
+  cameraCalibration(camera,width,height) {
+    const {back,right,up}=basisAt(camera.eye,camera.target);
+    const focal=width/(2*Math.tan(radians(camera.fov)/2));
+    const axes=[right,up.map(value=>-value),back.map(value=>-value)];
+    return {intrinsics:[[focal,0,width/2],[0,focal,height/2],[0,0,1]],
+      worldToCamera:[...axes.map(axis=>[...axis,-dot(axis,camera.eye)]),[0,0,0,1]]};
+  }
+
+  setProjection(image,{pixels,width,height,matrix},style) {
+    const gl=this.gl;
+    if (this.photo) {
+      gl.deleteTexture(this.photo.color);
+      gl.deleteTexture(this.photo.depth);
+    }
+    const color=uploadTexture(gl,image,{mipmaps:false}),depth=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D,depth);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    const look=/\b(wet|rain\w*)\b|雨|湿/i.test(style)?{wet:.82}:{};
+    this.photo={color,depth,matrix,look};
+  }
+
+  bindProjection(locations,enabled) {
+    const gl=this.gl;
+    gl.uniform1i(locations.Photo,Number(!!this.photo&&enabled));
+    // Legal sampler assignments are needed even before a reference is ready.
+    for (const [unit,name,texture] of [[0,'PhotoColor',this.photo?.color],[1,'PhotoDepth',this.photo?.depth]]) {
+      const slot=enabled&&this.photo?unit+7:unit;
+      gl.uniform1i(locations[name],slot);
+      if (!texture||!enabled) continue;
+      gl.activeTexture(gl.TEXTURE0+slot);
+      gl.bindTexture(gl.TEXTURE_2D,texture);
+    }
+    if (enabled&&this.photo) gl.uniformMatrix4fv(locations.PhotoVP,false,this.photo.matrix);
   }
 
   render(engine,mode,sensor,view,size) {

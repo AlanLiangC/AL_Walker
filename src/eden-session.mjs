@@ -84,6 +84,7 @@ export class EdenSession {
     this.session=null;
     clearInterval(session.watch);
     session.abort.abort();
+    session.socket?.close();
     session.channel?.close();
     session.peer?.close();
     session.capture?.stop();
@@ -108,13 +109,20 @@ export class EdenSession {
   async connect() {
     if (!this.context) return;
     const session={ id:crypto.randomUUID(),epoch:++this.epoch,abort:new AbortController(),
+      single:!!this.context.referenceId,referenceSha256:this.context.referenceSha256,
+      rendererQuery:this.context.renderer?'?renderer='+encodeURIComponent(this.context.renderer):'',
       sent:new Map(),outputs:new Map(),next:0,lastPresented:0,received:0,paired:0,stamp:performance.now() };
     this.session=session;
     this.status('connecting');
     const signal=session.abort.signal;
     try {
-      const profile=await this.request('/config',{},AbortSignal.any([signal,AbortSignal.timeout(shortTimeout)]));
+      const profile=await this.request('/config'+session.rendererQuery,{},AbortSignal.any([signal,AbortSignal.timeout(shortTimeout)]));
       session.profile=profile;
+      if ((session.single||profile.backend==='regen')&&profile.direct&&!this.config.token&&new URL(this.config.endpoint).origin===location.origin&&
+          !new URLSearchParams(location.search).has('edenRtc')) {
+        this.connectSocket(session);
+        return;
+      }
       session.capture=createCapture(profile);
       const peer=session.peer=new RTCPeerConnection({ iceServers:this.config.iceServers });
       const transceiver=peer.addTransceiver(session.capture.track,{direction:'sendrecv'});
@@ -145,12 +153,81 @@ export class EdenSession {
       const parameters=sender.getParameters();
       if (parameters.encodings?.length) {
         parameters.degradationPreference='maintain-resolution';
+        if (profile.bitrate) parameters.encodings[0].maxBitrate=profile.bitrate*2;
         await sender.setParameters(parameters);
       }
       session.watch=setInterval(()=>this.watch(session),150);
     } catch (error) {
       this.fail(session,error.message);
     }
+  }
+
+  connectSocket(session) {
+    const {width,height,fps}=session.profile;
+    const canvas=document.createElement('canvas');
+    canvas.width=width;
+    canvas.height=height;
+    const surface=canvas.getContext('2d',{alpha:false});
+    const socket=session.socket=new WebSocket(this.config.endpoint.replace(/^http/,'ws')+'/live'+session.rendererQuery);
+    socket.binaryType='arraybuffer';
+    socket.onopen=()=>socket.send(JSON.stringify({sessionId:session.id,epoch:session.epoch,context:this.context}));
+    socket.onmessage=event=>this.receiveSocket(session,event.data);
+    socket.onclose=event=>this.fail(session,event.code===1013?'GPU 正在预热或繁忙':'媒体连接中断');
+    const period=1000/fps;
+    let next=-Infinity,encoding=false;
+    session.capture={width,height,due:now=>!encoding&&now>=next-2,stop() {},
+      send(image,input,now) {
+        next=now-next>2*period?now+period:next+period;
+        surface.drawImage(image,0,0,width,height);
+        encoding=true;
+        canvas.toBlob(blob=>{
+          encoding=false;
+          if (!blob||socket.readyState!==WebSocket.OPEN) return;
+          const header=new TextEncoder().encode(JSON.stringify(input));
+          const size=new Uint8Array(4);
+          new DataView(size.buffer).setUint32(0,header.length);
+          socket.send(new Blob([size,header,blob]));
+        },'image/jpeg',.94);
+      },
+    };
+    session.watch=setInterval(()=>this.watch(session),150);
+  }
+
+  async receiveSocket(session,data) {
+    if (this.session!==session) return;
+    if (typeof data==='string') {
+      let message;
+      try { message=JSON.parse(data); } catch { return; }
+      if (message.type==='ready'&&message.sessionId===session.id&&message.epoch===session.epoch) {
+        session.warmAt=performance.now();
+        this.status('warming',session.profile.backend);
+      } else this.message(session,{data});
+      return;
+    }
+    const size=data.byteLength>=4?new DataView(data).getUint32(0):0;
+    if (!size||size>4096||data.byteLength<=4+size) return;
+    let output;
+    try { output=JSON.parse(new TextDecoder().decode(new Uint8Array(data,4,size))); } catch { return; }
+    const input=session.sent.get(output?.frameId);
+    if (!input||output.sessionId!==session.id||output.epoch!==session.epoch||output.simTick!==input.simTick||
+        output.referenceSha256!==session.referenceSha256) return;
+    let image;
+    try {
+      image=await createImageBitmap(new Blob([new Uint8Array(data,4+size)],{type:'image/jpeg'}));
+      const expectedWidth=session.profile.width*(session.profile.backend==='regen'?2:1);
+      if (this.session!==session||output.outputId<=session.lastOutput||image.width!==expectedWidth||
+          image.height!==session.profile.height) return;
+      const now=performance.now(),ageMs=now-input.capturedAt;
+      if (ageMs>session.profile.maxAgeMs) return;
+      session.lastOutput=output.outputId;
+      const first=!session.lastPresented;
+      session.lastPresented=now;
+      this.attempt=0;
+      if (first) this.status('live',session.profile.backend);
+      this.callbacks.present(image,{...output,input,ageMs,submittedAt:now,backend:session.profile.backend,
+        tier:session.profile.tier,transport:'websocket'},session.profile);
+    } catch { /* An incomplete media frame is skipped. */ }
+    finally { image?.close(); }
   }
 
   watch(session) {
@@ -161,7 +238,7 @@ export class EdenSession {
     if (lastPresented&&now-lastPresented>profile.stallMs) return this.fail(session,'回显超时');
     for (const [id,input] of session.sent) if (now-input.capturedAt>retention) session.sent.delete(id);
     for (const [id,output] of session.outputs) if (now-output.receivedAt>retention) session.outputs.delete(id);
-    if (this.callbacks.stats&&(!session.statsAt||now-session.statsAt>1000)) {
+    if (session.peer&&this.callbacks.stats&&(!session.statsAt||now-session.statsAt>1000)) {
       session.statsAt=now;
       session.peer.getStats().then(reports=>{
         if (this.session!==session) return;
@@ -176,18 +253,24 @@ export class EdenSession {
 
   capture(now,render) {
     const session=this.session;
-    if (!session||session.channel?.readyState!=='open'||!session.capture.due(now)) return false;
-    if (session.channel.bufferedAmount>64_000) return false;
+    if (!session) return false;
+    const direct=!!session.socket;
+    if (direct?(!session.warmAt||session.socket.readyState!==WebSocket.OPEN||session.socket.bufferedAmount>512_000):
+        (session.channel?.readyState!=='open'||session.channel.bufferedAmount>64_000)) return false;
+    if (!session.capture.due(now)) return false;
     const frameId=++session.next;
     if (frameId>=idLimit) {
       this.fail(session,'重新同步帧编号');
       return false;
     }
-    const { image,...metadata }=render(session.capture);
+    const { image,local,...metadata }=render(session.capture);
     const input={ ...metadata,type:'input',sessionId:session.id,epoch:session.epoch,frameId,capturedAt:now };
-    session.sent.set(frameId,input);
-    session.channel.send(JSON.stringify(input));
-    session.capture.send(image,frameId,now);
+    session.sent.set(frameId,{...input,local});
+    if (direct) session.capture.send(image,input,now);
+    else {
+      session.channel.send(JSON.stringify(input));
+      session.capture.send(image,frameId,now);
+    }
     this.callbacks.input?.(input);
     return true;
   }
@@ -217,16 +300,18 @@ export class EdenSession {
       if (this.session!==session) return;
       video.requestVideoFrameCallback(render);
       const { width,height,maxAgeMs }=session.profile;
+      const encodedWidth=session.single?width:width*2;
       session.received++;
-      if (info.width!==width*2||info.height!==height+margin) {
+      if (info.width!==encodedWidth||info.height!==height+margin) {
         this.callbacks.unpaired?.({reason:'resolution',width:info.width,height:info.height,
           rtpTimestamp:info.rtpTimestamp,mediaTime:info.mediaTime});
         return;
       }
-      const outputId=this.readTag(video,height,width*2);
+      const outputId=this.readTag(video,height,encodedWidth);
       const output=session.outputs.get(outputId);
       const input=session.sent.get(output?.frameId);
-      if (!input||output.simTick!==input.simTick||outputId<=session.lastOutput) {
+      if (!input||output.simTick!==input.simTick||outputId<=session.lastOutput||
+          session.single&&output.referenceSha256!==session.referenceSha256) {
         this.callbacks.unpaired?.({ outputId,reason:outputId===session.lastOutput?'repeat':'no-mapping',
           rtpTimestamp:info.rtpTimestamp,mediaTime:info.mediaTime });
         return;
